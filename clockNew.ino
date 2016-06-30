@@ -7,13 +7,16 @@
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <DS1307RTC.h>
+#include <Time.h>
 #include "demo.h"
 
+HardwareSerial & ESPport = Serial;
 
-#define DEBUG true 
-#define BUFFER_SIZE 200
+// Объявляем переменные и константы
+#define DEBUG false 
+#define BUFFER_SIZE 220
 #define NUMITEMS(arg) ((size_t) (sizeof (arg) / sizeof (arg [0])))
-#define ONE_WIRE_BUS A3                //Это вывод для подключечения вывода DS, при распайке на плате RTS1703 датчика температуры                  
+#define ONE_WIRE_BUS A3                //Это вывод для подключения вывода DS, при распайке на плате RTS1703 датчика температуры                  
 #define TEMPERATURE_PRECISION 9
 #define DELTA_SHIM_FOR_ANIMATION 4
 #define MAX_SHIM_FOR_ANIMATION 150
@@ -27,13 +30,17 @@
 char buffer[BUFFER_SIZE];
 char *pb;
 
+String content;
+String header;
+
+
 // SoftwareSerial esp8266(8, 9); // RX, TX
 // При отладке Программный порт Serial используется для подключения к ESP8266,
 // Аппаратный Serial для вывода отладочной информации.
 // В боевой версии Аппаратный Serial (вывода 0-RX/1-TX используется для подключения к ESP8266,
 // вывод отладочной информации в консоль заккоментирован
 
-const int COM_BAUD = 115200;
+const int COM_BAUD = 9600;
 
 
 // Setup a oneWire instance to communicate with any OneWire devices (not just Maxim/Dallas temperature ICs)
@@ -46,7 +53,7 @@ DallasTemperature sensors(&oneWire);
 DeviceAddress insideThermometer;
 
 
-// Объявляем переменные и константы
+
 //Блок общих переменных скетча
 // К155ИД1 (1)
 uint8_t Pin_1_a = 5;                
@@ -126,11 +133,12 @@ uint8_t alarmHour = 0;
 uint8_t alarmMin = 0;
 uint8_t dayNight = 255;
 
+
 float tempC = 0;                    //(int)tempC/10
 bool sensorTemperatureIn = false;
 boolean isAlarm = false;
 boolean esp8266in = false;
-
+bool mode_auto = true;
 boolean play = false;
 
 uint8_t btn1 = 0;
@@ -169,11 +177,6 @@ const int delayFalse = 10;                // Длительность, мень�
 const int delayLongSingleClick = 1000;    // Длительность зажатия кнопки для выхода в режим увеличения громкости
 const int delayDeltaDoubleClick = 800;    // Длительность между кликами, когда будет зафиксирован двойной клик
 
-
-String content;
-String header;
-
-
 //Блок переменных для воспроизведения мелодии
 int freq[7][12] = {
     {65, 69, 73, 78, 82, 87, 92, 98, 104, 110, 117, 123},                     //0 = Большая октава
@@ -195,6 +198,643 @@ int freq[7][12] = {
  *           3 - зажата кнопка
  *           4 - отжата кнопка после долгого зажатия
  */
+
+
+
+void setup()  
+{
+
+    pinMode(Pin_2_a, OUTPUT);
+    pinMode(Pin_2_b, OUTPUT);
+    pinMode(Pin_2_c, OUTPUT);
+    pinMode(Pin_2_d, OUTPUT);
+    pinMode(Pin_1_a, OUTPUT);
+    pinMode(Pin_1_b, OUTPUT);
+    pinMode(Pin_1_c, OUTPUT);
+    pinMode(Pin_1_d, OUTPUT);
+    pinMode(Pin_a_1, OUTPUT);
+    pinMode(Pin_a_2, OUTPUT);
+    pinMode(Pin_a_3, OUTPUT);
+    pinMode(Buzz_1, OUTPUT);
+    pinMode(Led_1, OUTPUT);
+
+    //    pinMode(Pin_dot1, OUTPUT);
+    //    pinMode(Pin_dot2, OUTPUT);
+
+    pinMode(Pin_rt1, INPUT);
+    pinMode(Pin_rt2, INPUT);
+    pinMode(Led_1, OUTPUT);
+    
+    analogWrite(Led_1, 1);
+    digitalWrite(Buzz_1, 0);
+    
+
+   sensors.begin();
+    
+    if (sensors.getAddress(insideThermometer, 0)) {
+        sensorTemperatureIn = true;
+        sensors.setResolution(insideThermometer, TEMPERATURE_PRECISION);
+   }
+   
+   // Инициализируем последовательный интерфейс и ждем открытия порта:
+    //  esp8266.begin(COM_BAUD);
+    ESPport.begin(COM_BAUD);
+    while(!ESPport){
+    
+      }
+    if (sendData("AT+RST\r\n",3400,DEBUG)==OK){
+ //   Serial.println("ok");
+  } else {
+//    Serial.println("error");
+  }
+  sendData("ATE0\r\n",500,DEBUG);  
+//  Serial.println("Configure as access point - ");        
+  if (sendData("AT+CWMODE=2\r\n",300,DEBUG)==OK){
+ //   Serial.println("ok");
+  } else {
+ //   Serial.println("error");
+  }
+//  Serial.println("Configure for multiple connections "); 
+  if (sendData("AT+CIPMUX=1\r\n",500,DEBUG)==OK){
+ //   Serial.println("ok");
+  } else {
+ //   Serial.println("error");   
+  }
+//  Serial.println("Turn on server on port 80  "); 
+  if (sendData("AT+CIPSERVER=1,80\r\n",1000,DEBUG)==OK){// turn on server on port 80
+ //   Serial.println("ok");
+  esp8266in = true;
+ } else {
+//    Serial.println("error");  
+  }
+ // sendData("AT+CIPSTO=2",300, DEBUG); // Таймаут сервера 2 секунды
+//  Serial.println("Waiting for page request  "); 
+//  Serial.println("Get ip address  "); 
+  if (sendData("AT+CIFSR", 500, DEBUG)==OK){ // узнаём адрес
+ //   Serial.print("ok");
+  } else {
+//    Serial.print("error");  
+  }
+
+    // Назначаем входные и выходные регистры
+    
+
+    
+
+ 
+}
+
+
+void loop() // выполняется циклически
+{
+  
+    StaticJsonBuffer<200> jsonBuffer;
+    int ch_id, packet_len;
+    
+    // Работа с WiFi модулум esp8266
+    //Чтение кнопок идет до обработки полученных данных через WiFi
+     
+    int btn2 = changeButtonStatus(Pin_rt2);
+    
+/*
+    if (esp8266in) {
+    dayNight = 255;
+     } else
+     {
+     dayNight = 0;
+     }
+*/     
+      
+    if (esp8266in && ESPport.available()){   // esp8266in    Если был получен успешный ответ о старте сервера
+
+        ESPport.readBytesUntil('\n', buffer, BUFFER_SIZE);
+        if (strncmp(buffer,"+IPD,", 5)==0) {         //Сравниваем считанное с  "+IPD,".
+            //    Serial.println("Incomming connection");
+            //    Serial.println(buffer);
+            sscanf(buffer+5, "%d,%d", &ch_id, &packet_len);   //Считываем из буфера значения идентификатора подключения и длинну пакета.
+            if (packet_len > 0){
+                pb = buffer+5;
+                while(*pb!=':') pb++;
+                pb++;
+            }
+            if((strncmp(pb, "GET / ", 6) == 0) || (strncmp(pb, "GET /?", 6) == 0))
+            {
+                clearSerialBuffer();
+                JsonObject& root = jsonBuffer.createObject();
+                content = "";
+                root["mode"] = mode;
+                root["hours"] = hours;
+                root["mins"] = Mins;
+                root["sec"] = Seconds;
+                root["tset"] = timeset;
+                root["alSet"] = alarmclockset;
+                root["m_a"] = mode_auto;
+                root["led"] = dayNight;
+                root["tC"] = tempC;                    //(int)tempC/10
+                root["sIn"] = sensorTemperatureIn;
+                root["isAl"] = isAlarm;
+                root["alHour"] = alarmHour;
+                root["alMin"] = alarmMin;
+                root["btn1"] = btn1;
+                root["btn2"] = btn2;
+                root["play"] = play;
+                root.printTo(content);
+                sendReply(ch_id);
+            } else if((strncmp(pb, "PUT / ", 6) == 0) || (strncmp(pb, "SET /?", 6) == 0))
+            {
+                long int time = millis();
+                while( (time+400) > millis())
+                {
+                    while(ESPport.available())
+                    {
+                        ESPport.readBytesUntil('\n', buffer, BUFFER_SIZE);
+                        if (buffer[0] == '{')          //Признак строки с json данными
+                        {
+                            JsonObject& root = jsonBuffer.parseObject(buffer);
+                            if (root.success()) {
+                                mode = root["mode"];
+                                hours = root["hours"];
+                                Mins = root["mins"];
+                                Seconds = root["sec"];
+                                timeset = root["tset"];
+                                alarmclockset = root["alSet"];
+                                mode_auto = root["m_a"];
+                                dayNight = root["led"];
+                              //  tempC = root["tC"];                    //(int)tempC/10
+                              //  sensorTemperatureIn = root["sIn"];
+                                isAlarm = root["isAl"];
+                                alarmHour = root["alHour"];
+                                alarmMin = root["alMin"];
+                                btn1 = root["btn1"];
+                                btn2 = root["btn2"];
+                                play = root["play"];
+                            } else {
+                                // Serial.println();
+                                // Serial.println("Parsing ERROR");
+                            }
+                             isReadTemperature = false;  //Для однократного чтения температуры при получении пакета.
+                        }
+                        clearBuffer();
+                        delay(20);
+                    }
+                }
+                content = "";
+                sendReply(ch_id);
+            }
+            clearBuffer();
+        }
+    }
+    //Счетчик для анимации
+    if (z==DELAY_ANIMATION)
+    {
+        j++;
+        z=0;
+    }
+    if (j==10) {animate=false; j=0; z=0;}
+    if (animate) z++;
+
+    RTC.read(tm);
+    Mins = tm.Minute;
+    Seconds = tm.Second;
+    hours = tm.Hour;
+
+    if (isAlarm) {                 //если установлен будильник горят точки
+     //   digitalWrite(Pin_dot1, HIGH);
+     //   digitalWrite(Pin_dot2, HIGH);
+        if (alarmHour==tm.Hour&&alarmMin==Mins&&alarmclockset==0) {
+            isAlarm = false;
+        //    playMusic();
+        }
+
+    }/* else {
+        digitalWrite(Pin_dot1, LOW);
+        digitalWrite(Pin_dot2, LOW);
+    }*/
+
+    if((tm.Hour>=8)&&(tm.Hour<20)) dayNight=255;
+    if((tm.Hour>=20)&&(tm.Hour<22)) dayNight=40;
+    if((tm.Hour>=22)&&(tm.Hour<0)) dayNight=10;
+    if((tm.Hour>=0)&&(tm.Hour<8)) dayNight=0;
+    analogWrite(Led_1, dayNight);  
+
+    switch(mode)
+    {
+    case 0:
+        NumberArray[0] = tm.Hour / 10; //Первый знак часа
+        NumberArray[1] = tm.Hour % 10; //Второй знак часа
+        NumberArray[2] = Mins / 10; //Первый знак минут
+        NumberArray[3] = Mins % 10; //Второй знак минут
+        NumberArray[4] = Seconds / 10; //Первый знак секунд
+        NumberArray[5] = Seconds % 10; //Второй знак секунд
+
+        break;
+    case 1:
+        NumberArray[0] = tm.Day / 10; //Первый знак дня
+        NumberArray[1] = tm.Day % 10; //Второй знак дня
+        NumberArray[2] = tm.Month / 10; //Первый знак месяца
+        NumberArray[3] = tm.Month % 10; //Второй знак месяца
+        NumberArray[4] = tmYearToY2k(tm.Year) / 10; //Первый знак года
+        NumberArray[5] = tmYearToY2k(tm.Year) % 10; //Второй знак года
+        /* //Мигание точками при показе даты пока убрано
+        if(timeset==0&&alarmclockset==0)
+        {
+            if ((Seconds % 10)%2==0)           ////Если знак секунды четный то включаем иначе выкл
+            {
+                digitalWrite(Pin_dot1, HIGH);
+                digitalWrite(Pin_dot2, HIGH);
+            }
+            else
+            {
+                digitalWrite(Pin_dot1, LOW);
+                digitalWrite(Pin_dot2, LOW);
+            }
+        }
+        */
+        break;
+
+    case 2:                               //Режим отображения установок будильника
+        NumberArray[0] = alarmHour / 10; //Первый знак часа
+        NumberArray[1] = alarmHour % 10; //Второй знак часа
+        NumberArray[2] = alarmMin / 10; //Первый знак минут
+        NumberArray[3] = alarmMin % 10; //Второй знак минут
+        NumberArray[4] = Seconds / 10; //Первый знак секунд
+        NumberArray[5] = Seconds % 10; //Второй знак секунд
+
+        //digitalWrite(Pin_dot1, HIGH);
+        //digitalWrite(Pin_dot2, HIGH);
+
+        /*
+         //Убрано. пока нет свободных вывовдом для включения точек
+        if (isAlarm) {
+            digitalWrite(Pin_dot1, HIGH);
+            digitalWrite(Pin_dot2, HIGH);
+        }
+        */
+        break;
+
+    case 3:                                //отображение температуры
+        if(sensorTemperatureIn)
+        {
+        
+            if (!isReadTemperature)
+            {
+                sensors.requestTemperatures();
+                tempC = sensors.getTempC(insideThermometer);            // Поправка введена в связи с неточностью работы датчика
+                isReadTemperature = true;
+                float b = (tempC - int(tempC))*100;
+                //Serial.println((int)b/10);
+                //Serial.println((int)b%10);
+                NumberArray[0] = (int)tempC/10; //Первый
+                NumberArray[1] = (int) tempC%10; //Второй
+                NumberArray[2] = (int)b/10; //Первый после запятой
+                NumberArray[3] = 10;        //пусто
+                NumberArray[4] = 10;        //пусто
+                NumberArray[5] = 10;
+                //NumberArray[5] =(int)b%10; //Второй знак после запятой
+
+            }
+            
+            millisThis = millis();
+            if(millisThis - millisAnimation > 700) {  //Если пауза вышла двигаем колбы влево
+                
+                //   for (uint8_t i=0; i<6; i++) {
+                //     NumberArray[i] = NumberAnimationArray[a][i];         //устанавливаем значения колб для анимации
+                // }
+                uint8_t a = NumberArray[0];
+                NumberArray[0] = NumberArray[1];        //пусто
+                NumberArray[1] = NumberArray[2];        //пусто
+                NumberArray[2] = NumberArray[3]; //Первый
+                NumberArray[3] = NumberArray[4]; //Второй
+                NumberArray[4] = NumberArray[5]; //Первый после запятой
+                NumberArray[5] = a;
+                millisAnimation = millisThis;
+            }
+
+
+        }
+        else mode = 0;
+        break;
+
+    case 4:                      //режим анимации
+        //  if(a < NUMITEMS(NumberAnimationDelay)){                   //не первышаем количество шагов анимации
+        if(a < 130){
+            //   Serial.println("Animation step ");
+            //   Serial.println("a");
+            for (uint8_t i=0; i<6; i++) {
+                NumberArray[i] = NumberAnimationArray[a][i];         //устанавливаем значения колб для анимации
+            }
+
+            millisThis = millis();                                 //время сейчас
+            // unsigned int mills = NumberAnimationDelay[a];
+            if(millisThis - millisAnimation > NumberAnimationArray[a][6]) {  //Если время на анимацию одного шага вышло, переходим к другому
+                a++;
+                millisAnimation = millisThis;
+            }
+
+        } else {                                                      //Если количество шагов исчерпано, выходим в режим 1
+            mode = 0;
+        //    playMusic();                                                //Включаем музыку
+        }
+        break;
+    }
+
+    if  (timeset==0&&alarmclockset==0&&mode!=4){      //Мы не в режиме установки времени, часов и не в режиме анимации.
+        //Каждые пол часа пищим
+        // if ((Mins == 0)&&sec||(Mins == 30)&&sec)
+        // {
+        //  tone(Buzz_1,100, 100);
+        //  sec=false;
+        // }                               убрал, т.к. иногда мешает
+        // if ((Mins == 1)&&!sec||(Mins == 31)&&!sec)
+        // {
+        //   sec=true;
+        // }
+        //Каждые 58 секунд включаем время
+     if (mode_auto)     //Если выбран режим авто смены 
+       {
+        if (Seconds==58)
+        {
+            mode=0;
+            animate=true;
+            //            printConsoleTime();
+            //
+           // Serial.println("Time On ");
+        }
+        //Включаем дату на 47 секунду
+        if (Seconds==47)
+        {
+            mode=1;
+            animate=true;
+            isReadTemperature = false;                //Для однократного чтения тепературы
+            //            printConsoleTime();
+            //            Serial.println("Date On ");
+            
+        }
+        //Включаем температуру на 53 секунду
+        if ((Seconds==52)&(sensorTemperatureIn))
+        {
+            mode=3;
+            animate=true;
+            //            printConsoleTime();
+            //            Serial.println("Date On ");
+        }
+        
+
+        //Переключаем режимы
+        if (!digitalRead(Pin_rt1)&&!up)
+        {
+            up=true;
+            animate=true;
+            tone(Buzz_1,100, 100);
+            mode++;
+            mode %= 5;
+            if (mode==4) {      //Если перешли к демо режиму
+                animate=false;    //обычную анимацию отключаем
+                a=0;              //переход к первому шагу анимации
+                millisAnimation = millis();                  //фиксируем время начала анимации
+            }
+            if (mode==3) isReadTemperature = false;   //Для чтения температуры при ручной смене режима отображения
+            // printConsoleTime();
+            // Serial.print("Mode change to - ");
+            // Serial.println(mode);
+            // printConsoleTime(); // Для отладки
+        }
+
+        if (digitalRead(Pin_rt1)&&up)
+        {
+            up=false;
+        }
+    }
+   }
+    //Перебор настоек при смене времени (вход) по длительному нажатию Pin_rt2
+   
+    if (btn2==1) {          //Если мы в режиме смены времени то реагируем на одиночные нажатия внопки для выборя изменяемого параметра
+        // Serial.println("In change");
+        if (timeset!=0&&alarmclockset==0){     //Изменение параметров для установки часов
+            timeset++;
+            tone(Buzz_1,100, 100);
+            if (timeset>=7)
+            {
+                timeset=1;
+            }
+            //  Serial.print("In time change, timeset is ");
+            //  Serial.println(timeset);
+        }
+        if (timeset==0&&alarmclockset!=0){   //Изменение параметров для установки будильника
+            alarmclockset++;
+            if (alarmclockset>=3) alarmclockset = 1;
+            tone(Buzz_1,100, 100);
+            //  Serial.println("In alarm set, alarm is ");
+            // printConsoleAlarm();
+        }
+    }
+    if (btn2==4) {          //Отжата кнопка после долгого нажатия и мы не были в режиме смены даты времени
+        if (timeset==0){
+            // Serial.print("In time change begin");
+            timeset = 1;            //Взаимоисключающие режимы
+            mode = 0;
+            alarmclockset = 0;
+            //  Serial.println(timeset);
+        }else{
+            //  Serial.println(timeset);
+            //  Serial.print("Exit on change time");
+            mode = 0;
+            timeset = 0;
+        }
+    }
+    if (btn2==2) {            //двойной клик - это переход к установке будильника
+        //  Serial.println("In duble click, set or change alarm");
+        if (alarmclockset==0) {   //если не в режиме установки
+            //    Serial.println("Set or change alarm");
+            mode = 2;
+            timeset = 0;
+            alarmclockset = 1;
+            
+            //    Serial.println(alarmclockset);
+        }else {               //Если мы уже были в процессе установки
+            //   Serial.println("Alarm set in ");
+            // printConsoleAlarm();
+            //тут будет код для записи часов и мин в EPROM
+            isAlarm = true;
+            alarmclockset = 0;
+            mode = 0;
+        }
+
+    }
+
+    switch(alarmclockset)
+    {
+    // Установка будильника
+    case 1:         //показываем и меняем часы
+        //   digitalWrite(Pin_dot1, HIGH);         //над показом точек думаем
+        //   digitalWrite(Pin_dot2, HIGH);
+        mode=2;                                 //специальный режим для отображения значений из установок ЧЧ:ММ будильника
+        NumberArray[2] = 10;
+        NumberArray[3] = 10;
+        NumberArray[4] = 10;
+        NumberArray[5] = 10;
+        if (!digitalRead(Pin_rt1)&&!up)
+        {
+            up=true;
+            alarmHour++;       // увеличиваем час смотрим что бы не больше 24
+            alarmHour %=24;
+            tone(Buzz_1,100, 100);
+            // printConsoleAlarm();
+        }
+        if (digitalRead(Pin_rt1)&&up) up=false;
+        break;
+    case 2:       //Показываем и меняем минуты будильника
+
+        NumberArray[0] = 10;
+        NumberArray[1] = 10;
+        NumberArray[4] = 10;
+        NumberArray[5] = 10;
+        if (!digitalRead(Pin_rt1)&&!up)
+        {
+            up=true;
+            alarmMin++;
+            alarmMin %=60;
+            tone(Buzz_1,100, 100);
+            //  printConsoleAlarm();
+        }
+        if (digitalRead(Pin_rt1)&&up) up=false;
+        break;
+    }
+
+    switch (timeset)
+    {
+    //Установка часов
+    // printConsoleTime();
+    case 1:
+      //  digitalWrite(Pin_dot1, HIGH);
+      //  digitalWrite(Pin_dot2, HIGH);
+        mode=0;
+        NumberArray[2] = 10;
+        NumberArray[3] = 10;
+        NumberArray[4] = 10;
+        NumberArray[5] = 10;
+        if (!digitalRead(Pin_rt1)&&!up)
+        {
+            up=true;
+            tm.Hour++;       // увеличиваем час смотрим что бы не больше 24
+            tm.Hour %=24;
+            RTC.write(tm);
+            tone(Buzz_1,100, 100);
+            // printConsoleTime();
+        }
+        if (digitalRead(Pin_rt1)&&up) up=false;
+        break;
+        //Установка минут
+    case 2:
+     //   digitalWrite(Pin_dot1, HIGH);
+     //   digitalWrite(Pin_dot2, HIGH);
+        mode=0;
+        NumberArray[0] = 10;
+        NumberArray[1] = 10;
+        NumberArray[4] = 10;
+        NumberArray[5] = 10;
+        if (!digitalRead(Pin_rt1)&&!up)
+        {
+            up=true;
+            tm.Minute++;
+            tm.Minute %=60;
+            RTC.write(tm);
+            tone(Buzz_1,100, 100);
+            // printConsoleTime();
+        }
+        if (digitalRead(Pin_rt1)&&up) up=false;
+        break;
+        //Установка секунд
+    case 3:
+     //   digitalWrite(Pin_dot1, HIGH);
+     //   digitalWrite(Pin_dot2, HIGH);
+        mode=0;
+        NumberArray[0] = 10;
+        NumberArray[1] = 10;
+        NumberArray[2] = 10;
+        NumberArray[3] = 10;
+        if (!digitalRead(Pin_rt1)&&!up)
+        {
+            up=true;
+            tm.Second++;
+            tm.Second %=60;
+            RTC.write(tm);
+            tone(Buzz_1,100, 100);
+            //  printConsoleTime();
+        }
+        if (digitalRead(Pin_rt1)&&up) up=false;
+        break;
+        //Установка дня
+    case 4:
+        mode=1;
+      //  digitalWrite(Pin_dot1, HIGH);
+     //   digitalWrite(Pin_dot2, HIGH);
+        NumberArray[2] = 10;
+        NumberArray[3] = 10;
+        NumberArray[4] = 10;
+        NumberArray[5] = 10;
+        if (!digitalRead(Pin_rt1)&&!up)
+        {
+            up=true;
+            tm.Day++;
+            tm.Day%=32;
+            if (tm.Day==0) tm.Day = 1;            //День нулевым быть не может
+            RTC.write(tm);
+            tone(Buzz_1,100, 100);
+            //  printConsoleTime();
+        }
+        if (digitalRead(Pin_rt1)&&up) up=false;
+        break;
+        // Установка месяца
+    case 5:
+        mode=1;
+     //   digitalWrite(Pin_dot1, HIGH);
+     //   digitalWrite(Pin_dot2, HIGH);
+        NumberArray[0] = 10;
+        NumberArray[1] = 10;
+        NumberArray[4] = 10;
+        NumberArray[5] = 10;
+        if (!digitalRead(Pin_rt1)&&!up)
+        {
+            up=true;
+            tm.Month++;
+            tm.Month %=13;
+            if (tm.Month==0) tm.Month = 1;            //День нулевым быть не может
+            RTC.write(tm);
+            tone(Buzz_1,100, 100);
+            //  printConsoleTime();
+        }
+        if (digitalRead(Pin_rt1)&&up) up=false;
+        break;
+        //Установка года
+    case 6:
+        mode=1;
+    //    digitalWrite(Pin_dot1, HIGH);
+    //    digitalWrite(Pin_dot2, HIGH);
+        NumberArray[0] = 10;
+        NumberArray[1] = 10;
+        NumberArray[2] = 10;
+        NumberArray[3] = 10;
+        if (!digitalRead(Pin_rt1)&&!up)
+        {
+            up=true;
+            tm.Year++;
+            RTC.write(tm);
+            tone(Buzz_1,100, 100);
+            //  printConsoleTime();
+        }
+        if (digitalRead(Pin_rt1)&&up) up=false;
+        break;
+    }
+    for (uint8_t i=0; i<6; i++){
+        if  (NumberArray[i]!=NumberArrayOLD[i]) isChangeArray[i] = true;       //Произошло изменение значения для отображения, нужно его анимировать
+        NumberArrayOLD[i] = NumberArray[i];                                   //Сохраняем текущее значение на следующий цикл как старое
+    }
+    
+    DisplayNumberString( NumberArray );
+    
+}
+
 
 int changeButtonStatus(int buttonPin) {
     // Событие
@@ -663,6 +1303,9 @@ void DisplayNumberString( uint8_t* array ) {    //Функция для отоб
 void sendReply(int ch_id)
 {
 
+
+
+
     // Serial.println("In Send Reply");
     header =  "HTTP/1.1 200 OK\r\n";
     // header += "Content-Type: application/json\r\n";
@@ -673,20 +1316,29 @@ void sendReply(int ch_id)
     header += "\r\n\r\n";
     //header += content;
 
-    Serial.print("AT+CIPSEND="); // ответ клиенту
-    Serial.print(ch_id);
-    Serial.print(",");
-    Serial.println(header.length()+content.length());
+    ESPport.print("AT+CIPSEND="); // ответ клиенту
+    ESPport.print(ch_id);
+    ESPport.print(",");
+    ESPport.println(header.length()+content.length());
 
+    delay(20);
+    if (ESPport.find(">")) {
+        //  Serial.println("Read > ");
+        ESPport.print(header);
+        ESPport.print(content);
+        delay(200);
+    } 
+    
+/*
     clearBuffer();
 
     long int time = millis();
     i = 0;
     while( (time+100) > millis())
     {
-        while(Serial.available() && i < BUFFER_SIZE )
+        while(ESPport.available() && i < BUFFER_SIZE )
         {
-            buffer[i] = Serial.read(); // read the next character.
+            buffer[i] = ESPport.read(); // read the next character.
             i++;
         }
     }
@@ -694,20 +1346,23 @@ void sendReply(int ch_id)
 
     if (strstr(buffer, ">") != 0) {
         //  Serial.println("Read > ");
-        Serial.print(header);
-        Serial.print(content);
+        ESPport.print(header);
+        ESPport.print(content);
+        delay(200);
     } else {
         //    Serial.println(" NOT Read > ");
-        Serial.println("+++");
+        ESPport.println("+++");
     }
+
+   */
 }
 
 //////////////////////очистка ESPport////////////////////
 void clearSerialBuffer(void)
 {
-    while (Serial.available() > 0 )
+    while (ESPport.available() > 0 )
     {
-        Serial.read();
+        ESPport.read();
     }
 }
 
@@ -727,15 +1382,15 @@ uint8_t sendData(String command, const int timeout, boolean debug)
     //   Serial.println(command);
     clearBuffer();
 
-    Serial.print(command);           // send the read character to the esp8266
+    ESPport.print(command);           // send the read character to the esp8266
     
     long int time = millis();
     i = 0;
     while( (time+timeout) > millis())
     {
-        while(Serial.available() && i < BUFFER_SIZE )
+        while(ESPport.available() && i < BUFFER_SIZE )
         {
-            buffer[i] = Serial.read(); // read the next character.
+            buffer[i] = ESPport.read(); // read the next character.
             i++;
         }
     }
@@ -762,603 +1417,4 @@ void playMusic()
     Qb_PLAY ("L2B>EDL4EDCC<BAL2BEP4>CL4<AL2B.L4GF+<B>GF+L1E");
 }
 
-void setup()  
-{
-    // Инициализируем последовательный интерфейс и ждем открытия порта:
-
-    // Назначаем входные и выходные регистры
-    pinMode(Pin_2_a, OUTPUT);
-    pinMode(Pin_2_b, OUTPUT);
-    pinMode(Pin_2_c, OUTPUT);
-    pinMode(Pin_2_d, OUTPUT);
-    pinMode(Pin_1_a, OUTPUT);
-    pinMode(Pin_1_b, OUTPUT);
-    pinMode(Pin_1_c, OUTPUT);
-    pinMode(Pin_1_d, OUTPUT);
-    pinMode(Pin_a_1, OUTPUT);
-    pinMode(Pin_a_2, OUTPUT);
-    pinMode(Pin_a_3, OUTPUT);
-    pinMode(Buzz_1, OUTPUT);
-    pinMode(Led_1, OUTPUT);
-
-    //    pinMode(Pin_dot1, OUTPUT);
-    //    pinMode(Pin_dot2, OUTPUT);
-
-    pinMode(Pin_rt1, INPUT);
-    pinMode(Pin_rt2, INPUT);
-    pinMode(Led_1, OUTPUT);
-    
-    analogWrite(Led_1, 0);
-    digitalWrite(Buzz_1, 0);
-
-    sensors.begin();
-    
-    if (sensors.getAddress(insideThermometer, 0)) {
-        sensorTemperatureIn = true;
-        sensors.setResolution(insideThermometer, TEMPERATURE_PRECISION);
-    }
-
-    //  esp8266.begin(COM_BAUD);
-    Serial.begin(COM_BAUD);
-    //  while(!Serial){
-    //
-    //  }
-    //  Serial.println();
-    //  Serial.println("Start");
-    //  Serial.print("Reset module - ");
-    // Сброс ESP
-    sendData("AT+RST\r\n",3400,DEBUG);
-    // Выключение режима ЭХО
-    sendData("ATE0\r\n",400,DEBUG);
-    // Включение режима работы AP (точка доступа)
-    sendData("AT+CWMODE=2\r\n",300,DEBUG);
-    //  Serial.println("Configure for multiple connections ");
-    sendData("AT+CIPMUX=1\r\n",300,DEBUG);
-    //  Serial.println("Turn on server on port 80  ");
-    if (sendData("AT+CIPSERVER=1,80\r\n",1000,DEBUG)==OK){// turn on server on port 80
-        //    Serial.println("ok");
-        esp8266in = true;
-    } else {
-        //    Serial.println("error");
-        esp8266in = false;
-    }
-    //Будет нужно для работы в режиме клиента
-    //  if (sendData("AT+CIFSR", 300, DEBUG)==OK){ // узнаём адрес
-    //    Serial.print("ok");
-    //  } else {
-    //    Serial.print("error");
-    //  }
-}
-
-
-void loop() // выполняется циклически
-{
-  
-    StaticJsonBuffer<220> jsonBuffer;
-    int ch_id, packet_len;
-    // Работа с WiFi модулум esp8266
-
-    if (esp8266in){        //Если был получен успешный ответ о старте сервера
-
-        Serial.readBytesUntil('\n', buffer, BUFFER_SIZE);
-        if (strncmp(buffer,"+IPD,", 5)==0) {         //Сравниваем считанное с  "+IPD,".
-            //    Serial.println("Incomming connection");
-            //    Serial.println(buffer);
-            sscanf(buffer+5, "%d,%d", &ch_id, &packet_len);   //Считываем из буфера значения идентификатора подключения и длинну пакета.
-            if (packet_len > 0){
-                pb = buffer+5;
-                while(*pb!=':') pb++;
-                pb++;
-            }
-            if((strncmp(pb, "GET / ", 6) == 0) || (strncmp(pb, "GET /?", 6) == 0))
-            {
-                clearSerialBuffer();
-                JsonObject& root = jsonBuffer.createObject();
-                content = "";
-                root["mode"] = mode;
-                root["hours"] = hours;
-                root["mins"] = Mins;
-                root["sec"] = Seconds;
-                root["timeset"] = timeset;
-                root["alarmSet"] = alarmclockset;
-                root["Led"] = dayNight;
-                root["tC"] = tempC;                    //(int)tempC/10
-                root["sensIn"] = sensorTemperatureIn;
-                root["isAlarm"] = isAlarm;
-                root["alHour"] = alarmHour;
-                root["alMin"] = alarmMin;
-                root["btn1"] = btn1;
-                root["btn2"] = btn2;
-                root["play"] = play;
-                root.printTo(content);
-                sendReply(ch_id);
-            } else if((strncmp(pb, "PUT / ", 6) == 0) || (strncmp(pb, "SET /?", 6) == 0))
-            {
-                long int time = millis();
-                while( (time+400) > millis())
-                {
-                    while(Serial.available())
-                    {
-                        Serial.readBytesUntil('\n', buffer, BUFFER_SIZE);
-                        if (buffer[0] == '{')          //Признак строки с json данными
-                        {
-                            JsonObject& root = jsonBuffer.parseObject(buffer);
-                            if (root.success()) {
-                                mode = root["mode"];
-                                hours = root["hours"];
-                                Mins = root["mins"];
-                                Seconds = root["sec"];
-                                timeset = root["timeset"];
-                                alarmclockset = root["alarmSet"];
-                                dayNight = root["Led"];
-                                tempC = root["tC"];                    //(int)tempC/10
-                                sensorTemperatureIn = root["sensIn"];
-                                isAlarm = root["isAlarm"];
-                                alarmHour = root["alHour"];
-                                alarmMin = root["alMin"];
-                                btn1 = root["btn1"];
-                                btn2 = root["btn2"];
-                                play = root["play"];
-                            } else {
-                                // Serial.println();
-                                // Serial.println("Parsing ERROR");
-                            }
-                        }
-                        clearBuffer();
-                        delay(20);
-                    }
-                }
-                content = "";
-                sendReply(ch_id);
-            }
-            clearBuffer();
-        }
-    }
-    //Счетчик для анимации
-    if (z==DELAY_ANIMATION)
-    {
-        j++;
-        z=0;
-    }
-    if (j==10) {animate=false; j=0; z=0;}
-    if (animate) z++;
-
-
-    RTC.read(tm);
-    Mins = tm.Minute;
-    //    if (Seconds != tm.Second) isChangeArray[5] = true;        //Изменилась секунда, задаем признак
-    Seconds = tm.Second;
-
-    if (isAlarm) {                 //если установлен будильник горят точки
-     //   digitalWrite(Pin_dot1, HIGH);
-     //   digitalWrite(Pin_dot2, HIGH);
-        if (alarmHour==tm.Hour&&alarmMin==Mins&&alarmclockset==0) {
-            isAlarm = false;
-            playMusic();
-        }
-
-    }/* else {
-        digitalWrite(Pin_dot1, LOW);
-        digitalWrite(Pin_dot2, LOW);
-    }*/
-
-    if((tm.Hour>=8)&&(tm.Hour<20)) dayNight=255;
-    if((tm.Hour>=20)&&(tm.Hour<22)) dayNight=40;
-    if((tm.Hour>=22)&&(tm.Hour<0)) dayNight=10;
-    if((tm.Hour>=0)&&(tm.Hour<8)) dayNight=0;
-
-    analogWrite(Led_1, dayNight);        //Яркость свечения диодов определяется временем
-    switch(mode)
-    {
-    case 0:
-        NumberArray[0] = tm.Hour / 10; //Первый знак часа
-        NumberArray[1] = tm.Hour % 10; //Второй знак часа
-        NumberArray[2] = Mins / 10; //Первый знак минут
-        NumberArray[3] = Mins % 10; //Второй знак минут
-        NumberArray[4] = Seconds / 10; //Первый знак секунд
-        NumberArray[5] = Seconds % 10; //Второй знак секунд
-
-        break;
-    case 1:
-        NumberArray[0] = tm.Day / 10; //Первый знак дня
-        NumberArray[1] = tm.Day % 10; //Второй знак дня
-        NumberArray[2] = tm.Month / 10; //Первый знак месяца
-        NumberArray[3] = tm.Month % 10; //Второй знак месяца
-        NumberArray[4] = tmYearToY2k(tm.Year) / 10; //Первый знак года
-        NumberArray[5] = tmYearToY2k(tm.Year) % 10; //Второй знак года
-        /* //Мигание точками при показе даты пока убрано
-        if(timeset==0&&alarmclockset==0)
-        {
-            if ((Seconds % 10)%2==0)           ////Если знак секунды четный то включаем иначе выкл
-            {
-                digitalWrite(Pin_dot1, HIGH);
-                digitalWrite(Pin_dot2, HIGH);
-            }
-            else
-            {
-                digitalWrite(Pin_dot1, LOW);
-                digitalWrite(Pin_dot2, LOW);
-            }
-        }
-        */
-        break;
-
-    case 2:                               //Режим отображения установок будильника
-        NumberArray[0] = alarmHour / 10; //Первый знак часа
-        NumberArray[1] = alarmHour % 10; //Второй знак часа
-        NumberArray[2] = alarmMin / 10; //Первый знак минут
-        NumberArray[3] = alarmMin % 10; //Второй знак минут
-        NumberArray[4] = Seconds / 10; //Первый знак секунд
-        NumberArray[5] = Seconds % 10; //Второй знак секунд
-
-        //digitalWrite(Pin_dot1, HIGH);
-        //digitalWrite(Pin_dot2, HIGH);
-
-        /*
-         //Убрано. пока нет свободных вывовдом для включения точек
-        if (isAlarm) {
-            digitalWrite(Pin_dot1, HIGH);
-            digitalWrite(Pin_dot2, HIGH);
-        }
-        */
-        break;
-
-    case 3:                                //отображение температуры
-        if(sensorTemperatureIn)
-        {
-            if (!isReadTemperature)
-            {
-                sensors.requestTemperatures();
-                tempC = sensors.getTempC(insideThermometer);            // Поправка введена в связи с неточностью работы датчика
-                isReadTemperature = true;
-                float b = (tempC - int(tempC))*100;
-                //Serial.println((int)b/10);
-                //Serial.println((int)b%10);
-                NumberArray[0] = (int)tempC/10; //Первый
-                NumberArray[1] = (int) tempC%10; //Второй
-                NumberArray[2] = (int)b/10; //Первый после запятой
-                NumberArray[3] = 10;        //пусто
-                NumberArray[4] = 10;        //пусто
-                NumberArray[5] = 10;
-                //NumberArray[5] =(int)b%10; //Второй знак после запятой
-
-            }
-            
-            millisThis = millis();
-            if(millisThis - millisAnimation > 700) {  //Если пауза вышла двигаем колбы влево
-                
-                //   for (uint8_t i=0; i<6; i++) {
-                //     NumberArray[i] = NumberAnimationArray[a][i];         //устанавливаем значения колб для анимации
-                // }
-                uint8_t a = NumberArray[0];
-                NumberArray[0] = NumberArray[1];        //пусто
-                NumberArray[1] = NumberArray[2];        //пусто
-                NumberArray[2] = NumberArray[3]; //Первый
-                NumberArray[3] = NumberArray[4]; //Второй
-                NumberArray[4] = NumberArray[5]; //Первый после запятой
-                NumberArray[5] = a;
-                millisAnimation = millisThis;
-            }
-
-
-        }
-        else mode = 0;
-        break;
-
-    case 4:                      //режим анимации
-        //  if(a < NUMITEMS(NumberAnimationDelay)){                   //не первышаем количество шагов анимации
-        if(a < 130){
-            //   Serial.println("Animation step ");
-            //   Serial.println("a");
-            for (uint8_t i=0; i<6; i++) {
-                NumberArray[i] = NumberAnimationArray[a][i];         //устанавливаем значения колб для анимации
-            }
-
-            millisThis = millis();                                 //время сейчас
-            // unsigned int mills = NumberAnimationDelay[a];
-            if(millisThis - millisAnimation > NumberAnimationArray[a][6]) {  //Если время на анимацию одного шага вышло, переходим к другому
-                a++;
-                millisAnimation = millisThis;
-            }
-
-        } else {                                                      //Если количество шагов исчерпано, выходим в режим 1
-            mode = 0;
-            playMusic();                                                //Включаем музыку
-        }
-        break;
-    }
-
-    if  (timeset==0&&alarmclockset==0&&mode!=4){      //Мы не в режиме установки времени, часов и не в режиме анимации.
-        //Каждые пол часа пищим
-        // if ((Mins == 0)&&sec||(Mins == 30)&&sec)
-        // {
-        //  tone(Buzz_1,100, 100);
-        //  sec=false;
-        // }                               убрал, т.к. иногда мешает
-        // if ((Mins == 1)&&!sec||(Mins == 31)&&!sec)
-        // {
-        //   sec=true;
-        // }
-        //Каждые 58 секунд включаем время
-        if (Seconds==58)
-        {
-            mode=0;
-            animate=true;
-            //            printConsoleTime();
-            //
-            Serial.println("Time On ");
-        }
-        //Включаем дату на 47 секунду
-        if (Seconds==47)
-        {
-            mode=1;
-            animate=true;
-            isReadTemperature = false;                //Для однократного чтения тепературы
-            //            printConsoleTime();
-            //            Serial.println("Date On ");
-            
-        }
-        //Включаем температуру на 53 секунду
-        if ((Seconds==52)&(sensorTemperatureIn))
-        {
-            mode=3;
-            animate=true;
-            //            printConsoleTime();
-            //            Serial.println("Date On ");
-        }
-        
-
-        //Переключаем режимы
-        if (!digitalRead(Pin_rt1)&&!up)
-        {
-            up=true;
-            animate=true;
-            tone(Buzz_1,100, 100);
-            mode++;
-            mode %= 5;
-            if (mode==4) {      //Если перешли к демо режиму
-                animate=false;    //обычную анимацию отключаем
-                a=0;              //переход к первому шагу анимации
-                millisAnimation = millis();                  //фиксируем время начала анимации
-            }
-            if (mode==3) isReadTemperature = false;   //Для чтения температуры при ручной смене режима отображения
-            // printConsoleTime();
-            // Serial.print("Mode change to - ");
-            // Serial.println(mode);
-            // printConsoleTime(); // Для отладки
-        }
-
-        if (digitalRead(Pin_rt1)&&up)
-        {
-            up=false;
-        }
-    }
-    //Перебор настоек при смене времени (вход) по длительному нажатию Pin_rt2
-    int btn2 = changeButtonStatus(Pin_rt2);
-    if (btn2==1) {          //Если мы в режиме смены времени то реагируем на одиночные нажатия внопки для выборя изменяемого параметра
-        // Serial.println("In change");
-        if (timeset!=0&&alarmclockset==0){     //Изменение параметров для установки часов
-            timeset++;
-            tone(Buzz_1,100, 100);
-            if (timeset>=7)
-            {
-                timeset=1;
-            }
-            //  Serial.print("In time change, timeset is ");
-            //  Serial.println(timeset);
-        }
-        if (timeset==0&&alarmclockset!=0){   //Изменение параметров для установки будильника
-            alarmclockset++;
-            if (alarmclockset>=3) alarmclockset = 1;
-            tone(Buzz_1,100, 100);
-            //  Serial.println("In alarm set, alarm is ");
-            // printConsoleAlarm();
-        }
-    }
-    if (btn2==4) {          //Отжата кнопка после долгого нажатия и мы не были в режиме смены даты времени
-        if (timeset==0){
-            // Serial.print("In time change begin");
-            timeset = 1;            //Взаимоисключающие режимы
-            mode = 0;
-            alarmclockset = 0;
-            //  Serial.println(timeset);
-        }else{
-            //  Serial.println(timeset);
-            //  Serial.print("Exit on change time");
-            mode = 0;
-            timeset = 0;
-        }
-    }
-    if (btn2==2) {            //двойной клик - это переход к установке будильника
-        //  Serial.println("In duble click, set or change alarm");
-        if (alarmclockset==0) {   //если не в режиме установки
-            //    Serial.println("Set or change alarm");
-            mode = 2;
-            timeset = 0;
-            alarmclockset = 1;
-            
-            //    Serial.println(alarmclockset);
-        }else {               //Если мы уже были в процессе установки
-            //   Serial.println("Alarm set in ");
-            // printConsoleAlarm();
-            //тут будет код для записи часов и мин в EPROM
-            isAlarm = true;
-            alarmclockset = 0;
-            mode = 0;
-        }
-
-    }
-
-    switch(alarmclockset)
-    {
-    // Установка будильника
-    case 1:         //показываем и меняем часы
-        //   digitalWrite(Pin_dot1, HIGH);         //над показом точек думаем
-        //   digitalWrite(Pin_dot2, HIGH);
-        mode=2;                                 //специальный режим для отображения значений из установок ЧЧ:ММ будильника
-        NumberArray[2] = 10;
-        NumberArray[3] = 10;
-        NumberArray[4] = 10;
-        NumberArray[5] = 10;
-        if (!digitalRead(Pin_rt1)&&!up)
-        {
-            up=true;
-            alarmHour++;       // увеличиваем час смотрим что бы не больше 24
-            alarmHour %=24;
-            tone(Buzz_1,100, 100);
-            // printConsoleAlarm();
-        }
-        if (digitalRead(Pin_rt1)&&up) up=false;
-        break;
-    case 2:       //Показываем и меняем минуты будильника
-
-        NumberArray[0] = 10;
-        NumberArray[1] = 10;
-        NumberArray[4] = 10;
-        NumberArray[5] = 10;
-        if (!digitalRead(Pin_rt1)&&!up)
-        {
-            up=true;
-            alarmMin++;
-            alarmMin %=60;
-            tone(Buzz_1,100, 100);
-            //  printConsoleAlarm();
-        }
-        if (digitalRead(Pin_rt1)&&up) up=false;
-        break;
-    }
-
-    switch (timeset)
-    {
-    //Установка часов
-    // printConsoleTime();
-    case 1:
-      //  digitalWrite(Pin_dot1, HIGH);
-      //  digitalWrite(Pin_dot2, HIGH);
-        mode=0;
-        NumberArray[2] = 10;
-        NumberArray[3] = 10;
-        NumberArray[4] = 10;
-        NumberArray[5] = 10;
-        if (!digitalRead(Pin_rt1)&&!up)
-        {
-            up=true;
-            tm.Hour++;       // увеличиваем час смотрим что бы не больше 24
-            tm.Hour %=24;
-            RTC.write(tm);
-            tone(Buzz_1,100, 100);
-            // printConsoleTime();
-        }
-        if (digitalRead(Pin_rt1)&&up) up=false;
-        break;
-        //Установка минут
-    case 2:
-     //   digitalWrite(Pin_dot1, HIGH);
-     //   digitalWrite(Pin_dot2, HIGH);
-        mode=0;
-        NumberArray[0] = 10;
-        NumberArray[1] = 10;
-        NumberArray[4] = 10;
-        NumberArray[5] = 10;
-        if (!digitalRead(Pin_rt1)&&!up)
-        {
-            up=true;
-            tm.Minute++;
-            tm.Minute %=60;
-            RTC.write(tm);
-            tone(Buzz_1,100, 100);
-            // printConsoleTime();
-        }
-        if (digitalRead(Pin_rt1)&&up) up=false;
-        break;
-        //Установка секунд
-    case 3:
-     //   digitalWrite(Pin_dot1, HIGH);
-     //   digitalWrite(Pin_dot2, HIGH);
-        mode=0;
-        NumberArray[0] = 10;
-        NumberArray[1] = 10;
-        NumberArray[2] = 10;
-        NumberArray[3] = 10;
-        if (!digitalRead(Pin_rt1)&&!up)
-        {
-            up=true;
-            tm.Second++;
-            tm.Second %=60;
-            RTC.write(tm);
-            tone(Buzz_1,100, 100);
-            //  printConsoleTime();
-        }
-        if (digitalRead(Pin_rt1)&&up) up=false;
-        break;
-        //Установка дня
-    case 4:
-        mode=1;
-      //  digitalWrite(Pin_dot1, HIGH);
-     //   digitalWrite(Pin_dot2, HIGH);
-        NumberArray[2] = 10;
-        NumberArray[3] = 10;
-        NumberArray[4] = 10;
-        NumberArray[5] = 10;
-        if (!digitalRead(Pin_rt1)&&!up)
-        {
-            up=true;
-            tm.Day++;
-            tm.Day%=32;
-            if (tm.Day==0) tm.Day = 1;            //День нулевым быть не может
-            RTC.write(tm);
-            tone(Buzz_1,100, 100);
-            //  printConsoleTime();
-        }
-        if (digitalRead(Pin_rt1)&&up) up=false;
-        break;
-        // Установка месяца
-    case 5:
-        mode=1;
-     //   digitalWrite(Pin_dot1, HIGH);
-     //   digitalWrite(Pin_dot2, HIGH);
-        NumberArray[0] = 10;
-        NumberArray[1] = 10;
-        NumberArray[4] = 10;
-        NumberArray[5] = 10;
-        if (!digitalRead(Pin_rt1)&&!up)
-        {
-            up=true;
-            tm.Month++;
-            tm.Month %=13;
-            if (tm.Month==0) tm.Month = 1;            //День нулевым быть не может
-            RTC.write(tm);
-            tone(Buzz_1,100, 100);
-            //  printConsoleTime();
-        }
-        if (digitalRead(Pin_rt1)&&up) up=false;
-        break;
-        //Установка года
-    case 6:
-        mode=1;
-    //    digitalWrite(Pin_dot1, HIGH);
-    //    digitalWrite(Pin_dot2, HIGH);
-        NumberArray[0] = 10;
-        NumberArray[1] = 10;
-        NumberArray[2] = 10;
-        NumberArray[3] = 10;
-        if (!digitalRead(Pin_rt1)&&!up)
-        {
-            up=true;
-            tm.Year++;
-            RTC.write(tm);
-            tone(Buzz_1,100, 100);
-            //  printConsoleTime();
-        }
-        if (digitalRead(Pin_rt1)&&up) up=false;
-        break;
-    }
-    for (uint8_t i=0; i<6; i++){
-        if  (NumberArray[i]!=NumberArrayOLD[i]) isChangeArray[i] = true;       //Произошло изменение значения для отображения, нужно его анимировать
-        NumberArrayOLD[i] = NumberArray[i];                                   //Сохраняем текущее значение на следующий цикл как старое
-    }
-    
-    DisplayNumberString( NumberArray );
-    
-}
 
