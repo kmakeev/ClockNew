@@ -14,7 +14,7 @@ HardwareSerial & ESPport = Serial;
 
 // Объявляем переменные и константы
 #define DEBUG false 
-#define BUFFER_SIZE 220
+#define BUFFER_SIZE 200
 #define NUMITEMS(arg) ((size_t) (sizeof (arg) / sizeof (arg [0])))
 #define ONE_WIRE_BUS A3                //Это вывод для подключения вывода DS, при распайке на плате RTS1703 датчика температуры                  
 #define TEMPERATURE_PRECISION 9
@@ -29,7 +29,6 @@ HardwareSerial & ESPport = Serial;
 
 char buffer[BUFFER_SIZE];
 char *pb;
-
 String content;
 String header;
 
@@ -72,19 +71,16 @@ uint8_t Pin_a_1 = 9;//колбы 1, 4
 uint8_t Pin_a_2 = 10;//колбы 2, 5
 uint8_t Pin_a_3 = 11; //колбы 3, 6       
 
-//Пины для точек
-// uint8_t Pin_dot1 = A3;   //В текущей реализации не используем
-// uint8_t Pin_dot2 = A3;   
-
 //Пины для кнопок 
-uint8_t Pin_rt1 = A0;   //Пока будем использовать аналоговые как цифровые
-uint8_t Pin_rt2 = A1;  
+uint8_t Pin_rt1 = A1;   //Пока будем использовать аналоговые как цифровые
+uint8_t Pin_rt2 = A2;  
 
 //Пин для подсветки
 uint8_t Led_1 = 3; 
 
 //Пин для бипера
-int Buzz_1 = A2;           
+int Buzz_1 = A0;           
+
 
 //Массив для управления анодами ламп
 static const uint8_t anods[3] = {Pin_a_1, Pin_a_2, Pin_a_3};
@@ -133,7 +129,9 @@ uint8_t alarmHour = 0;
 uint8_t alarmMin = 0;
 uint8_t dayNight = 255;
 
-
+uint8_t btn1;
+uint8_t btn2;
+    
 float tempC = 0;                    //(int)tempC/10
 bool sensorTemperatureIn = false;
 boolean isAlarm = false;
@@ -141,17 +139,11 @@ boolean esp8266in = false;
 bool mode_auto = true;
 boolean play = false;
 
-uint8_t btn1 = 0;
-uint8_t btn2 = 0;
-
 uint8_t a;
-
 uint8_t i=0, j=0, z=0;
+
 bool isReadTemperature = false;
-
-
-//boolean ok =false;
-boolean up = false;
+boolean up = false;         //Признак нажатия лглй из кнопок
 boolean animate = false;
 // boolean sec = true;      //не используется
 
@@ -189,18 +181,6 @@ int freq[7][12] = {
 };
 
 
-//Функция ятения значений с кнопок
-/**
- * Смена текущего статуса
- * @return = 0 - ничего не произошло
- *           1 - простой клик
- *           2 - двойнок клик
- *           3 - зажата кнопка
- *           4 - отжата кнопка после долгого зажатия
- */
-
-
-
 void setup()  
 {
 
@@ -223,9 +203,8 @@ void setup()
 
     pinMode(Pin_rt1, INPUT);
     pinMode(Pin_rt2, INPUT);
-    pinMode(Led_1, OUTPUT);
     
-    analogWrite(Led_1, 1);
+ //   analogWrite(Led_1, 1);
     digitalWrite(Buzz_1, 0);
     
 
@@ -288,22 +267,15 @@ void setup()
 void loop() // выполняется циклически
 {
   
-    StaticJsonBuffer<200> jsonBuffer;
+    StaticJsonBuffer<210> jsonBuffer;
     int ch_id, packet_len;
     
     // Работа с WiFi модулум esp8266
     //Чтение кнопок идет до обработки полученных данных через WiFi
-     
-    int btn2 = changeButtonStatus(Pin_rt2);
+   btn1 = digitalRead(Pin_rt1);
+   btn2 = changeButtonStatus(Pin_rt2); 
     
-/*
-    if (esp8266in) {
-    dayNight = 255;
-     } else
-     {
-     dayNight = 0;
-     }
-*/     
+ 
       
     if (esp8266in && ESPport.available()){   // esp8266in    Если был получен успешный ответ о старте сервера
 
@@ -323,21 +295,25 @@ void loop() // выполняется циклически
                 JsonObject& root = jsonBuffer.createObject();
                 content = "";
                 root["mode"] = mode;
-                root["hours"] = hours;
-                root["mins"] = Mins;
+                root["hh"] = hours;
+                root["min"] = Mins;
                 root["sec"] = Seconds;
+                root["dd"] = tm.Day;
+                root["mm"] = tm.Month;
+                root["yy"] = tmYearToY2k(tm.Year);
                 root["tset"] = timeset;
                 root["alSet"] = alarmclockset;
                 root["m_a"] = mode_auto;
                 root["led"] = dayNight;
                 root["tC"] = tempC;                    //(int)tempC/10
-                root["sIn"] = sensorTemperatureIn;
+                // root["sIn"] = sensorTemperatureIn;
                 root["isAl"] = isAlarm;
                 root["alHour"] = alarmHour;
                 root["alMin"] = alarmMin;
                 root["btn1"] = btn1;
                 root["btn2"] = btn2;
                 root["play"] = play;
+                
                 root.printTo(content);
                 sendReply(ch_id);
             } else if((strncmp(pb, "PUT / ", 6) == 0) || (strncmp(pb, "SET /?", 6) == 0))
@@ -352,22 +328,25 @@ void loop() // выполняется циклически
                         {
                             JsonObject& root = jsonBuffer.parseObject(buffer);
                             if (root.success()) {
-                                mode = root["mode"];
-                                hours = root["hours"];
-                                Mins = root["mins"];
-                                Seconds = root["sec"];
-                                timeset = root["tset"];
-                                alarmclockset = root["alSet"];
-                                mode_auto = root["m_a"];
-                                dayNight = root["led"];
-                              //  tempC = root["tC"];                    //(int)tempC/10
-                              //  sensorTemperatureIn = root["sIn"];
-                                isAlarm = root["isAl"];
-                                alarmHour = root["alHour"];
-                                alarmMin = root["alMin"];
-                                btn1 = root["btn1"];
+                                btn1 = root["btn1"];          //Считываем их из пакета по сети
                                 btn2 = root["btn2"];
-                                play = root["play"];
+                                if (btn1==1 && btn2==0) {     //Если в пакете пришла информация что ни одна из кнопок в приложении не нажата 
+                                                              // (внимание btn1 и btn1 используют разные признаки), то извлекаем остальные параметры
+                                  mode = root["mode"];
+                                  // hours = root["hours"];
+                                  // Mins = root["mins"];
+                                  // Seconds = root["sec"];
+                                  timeset = root["tset"];
+                                  alarmclockset = root["alSet"];
+                                  mode_auto = root["m_a"];
+                                  dayNight = root["led"];
+                                  //  tempC = root["tC"];                    //(int)tempC/10
+                                  //  sensorTemperatureIn = root["sIn"];
+                                  isAlarm = root["isAl"];
+                                  // alarmHour = root["alHour"];
+                                  // alarmMin = root["alMin"];
+                                  play = root["play"];
+                                }                            
                             } else {
                                 // Serial.println();
                                 // Serial.println("Parsing ERROR");
@@ -410,11 +389,13 @@ void loop() // выполняется циклически
         digitalWrite(Pin_dot1, LOW);
         digitalWrite(Pin_dot2, LOW);
     }*/
-
-    if((tm.Hour>=8)&&(tm.Hour<20)) dayNight=255;
-    if((tm.Hour>=20)&&(tm.Hour<22)) dayNight=40;
-    if((tm.Hour>=22)&&(tm.Hour<0)) dayNight=10;
-    if((tm.Hour>=0)&&(tm.Hour<8)) dayNight=0;
+    if (dayNight!=1){                              // Единицу присылаем из проложения - это равносильно выключению, 
+                                                    // В остальных случаях подсветку устанавливаем по времени 
+      if((tm.Hour>=8)&&(tm.Hour<20)) dayNight=255;
+      if((tm.Hour>=20)&&(tm.Hour<22)) dayNight=40;
+      if((tm.Hour>=22)&&(tm.Hour<0)) dayNight=10;
+      if((tm.Hour>=0)&&(tm.Hour<8)) dayNight=0;
+    }
     analogWrite(Led_1, dayNight);  
 
     switch(mode)
@@ -464,7 +445,7 @@ void loop() // выполняется циклически
         //digitalWrite(Pin_dot2, HIGH);
 
         /*
-         //Убрано. пока нет свободных вывовдом для включения точек
+         //Убрано. пока нет свободных пинов для включения точек
         if (isAlarm) {
             digitalWrite(Pin_dot1, HIGH);
             digitalWrite(Pin_dot2, HIGH);
@@ -536,6 +517,15 @@ void loop() // выполняется циклически
         //    playMusic();                                                //Включаем музыку
         }
         break;
+     case 5:            //Режим выключения ламп, тупо подаем 10 на дешифраторы и ничего на них не отображаем
+        
+        NumberArray[0] = 10; 
+        NumberArray[1] = 10; 
+        NumberArray[2] = 10; 
+        NumberArray[3] = 10;       
+        NumberArray[4] = 10;        
+        NumberArray[5] = 10;
+        break;
     }
 
     if  (timeset==0&&alarmclockset==0&&mode!=4){      //Мы не в режиме установки времени, часов и не в режиме анимации.
@@ -578,16 +568,16 @@ void loop() // выполняется циклически
             //            printConsoleTime();
             //            Serial.println("Date On ");
         }
-        
+       } 
 
         //Переключаем режимы
-        if (!digitalRead(Pin_rt1)&&!up)
+        if (!btn1&&!up)
         {
             up=true;
             animate=true;
             tone(Buzz_1,100, 100);
             mode++;
-            mode %= 5;
+            mode %= 6;
             if (mode==4) {      //Если перешли к демо режиму
                 animate=false;    //обычную анимацию отключаем
                 a=0;              //переход к первому шагу анимации
@@ -600,12 +590,11 @@ void loop() // выполняется циклически
             // printConsoleTime(); // Для отладки
         }
 
-        if (digitalRead(Pin_rt1)&&up)
+        if (btn1&&up)
         {
             up=false;
         }
-    }
-   }
+  }
     //Перебор настоек при смене времени (вход) по длительному нажатию Pin_rt2
    
     if (btn2==1) {          //Если мы в режиме смены времени то реагируем на одиночные нажатия внопки для выборя изменяемого параметра
@@ -673,7 +662,7 @@ void loop() // выполняется циклически
         NumberArray[3] = 10;
         NumberArray[4] = 10;
         NumberArray[5] = 10;
-        if (!digitalRead(Pin_rt1)&&!up)
+        if (!btn1&&!up)
         {
             up=true;
             alarmHour++;       // увеличиваем час смотрим что бы не больше 24
@@ -681,7 +670,7 @@ void loop() // выполняется циклически
             tone(Buzz_1,100, 100);
             // printConsoleAlarm();
         }
-        if (digitalRead(Pin_rt1)&&up) up=false;
+        if (btn1&&up) up=false;
         break;
     case 2:       //Показываем и меняем минуты будильника
 
@@ -689,7 +678,7 @@ void loop() // выполняется циклически
         NumberArray[1] = 10;
         NumberArray[4] = 10;
         NumberArray[5] = 10;
-        if (!digitalRead(Pin_rt1)&&!up)
+        if (!btn1&&!up)
         {
             up=true;
             alarmMin++;
@@ -697,7 +686,7 @@ void loop() // выполняется циклически
             tone(Buzz_1,100, 100);
             //  printConsoleAlarm();
         }
-        if (digitalRead(Pin_rt1)&&up) up=false;
+        if (btn1&&up) up=false;
         break;
     }
 
@@ -713,7 +702,7 @@ void loop() // выполняется циклически
         NumberArray[3] = 10;
         NumberArray[4] = 10;
         NumberArray[5] = 10;
-        if (!digitalRead(Pin_rt1)&&!up)
+        if (!btn1&&!up)
         {
             up=true;
             tm.Hour++;       // увеличиваем час смотрим что бы не больше 24
@@ -722,7 +711,7 @@ void loop() // выполняется циклически
             tone(Buzz_1,100, 100);
             // printConsoleTime();
         }
-        if (digitalRead(Pin_rt1)&&up) up=false;
+        if (btn1&&up) up=false;
         break;
         //Установка минут
     case 2:
@@ -733,7 +722,7 @@ void loop() // выполняется циклически
         NumberArray[1] = 10;
         NumberArray[4] = 10;
         NumberArray[5] = 10;
-        if (!digitalRead(Pin_rt1)&&!up)
+        if (!btn1&&!up)
         {
             up=true;
             tm.Minute++;
@@ -742,7 +731,7 @@ void loop() // выполняется циклически
             tone(Buzz_1,100, 100);
             // printConsoleTime();
         }
-        if (digitalRead(Pin_rt1)&&up) up=false;
+        if (btn1&&up) up=false;
         break;
         //Установка секунд
     case 3:
@@ -753,7 +742,7 @@ void loop() // выполняется циклически
         NumberArray[1] = 10;
         NumberArray[2] = 10;
         NumberArray[3] = 10;
-        if (!digitalRead(Pin_rt1)&&!up)
+        if (!btn1&&!up)
         {
             up=true;
             tm.Second++;
@@ -762,7 +751,7 @@ void loop() // выполняется циклически
             tone(Buzz_1,100, 100);
             //  printConsoleTime();
         }
-        if (digitalRead(Pin_rt1)&&up) up=false;
+        if (btn1&&up) up=false;
         break;
         //Установка дня
     case 4:
@@ -773,7 +762,7 @@ void loop() // выполняется циклически
         NumberArray[3] = 10;
         NumberArray[4] = 10;
         NumberArray[5] = 10;
-        if (!digitalRead(Pin_rt1)&&!up)
+        if (!btn1&&!up)
         {
             up=true;
             tm.Day++;
@@ -783,7 +772,7 @@ void loop() // выполняется циклически
             tone(Buzz_1,100, 100);
             //  printConsoleTime();
         }
-        if (digitalRead(Pin_rt1)&&up) up=false;
+        if (btn1&&up) up=false;
         break;
         // Установка месяца
     case 5:
@@ -794,7 +783,7 @@ void loop() // выполняется циклически
         NumberArray[1] = 10;
         NumberArray[4] = 10;
         NumberArray[5] = 10;
-        if (!digitalRead(Pin_rt1)&&!up)
+        if (!btn1&&!up)
         {
             up=true;
             tm.Month++;
@@ -804,7 +793,7 @@ void loop() // выполняется циклически
             tone(Buzz_1,100, 100);
             //  printConsoleTime();
         }
-        if (digitalRead(Pin_rt1)&&up) up=false;
+        if (btn1&&up) up=false;
         break;
         //Установка года
     case 6:
@@ -815,7 +804,7 @@ void loop() // выполняется циклически
         NumberArray[1] = 10;
         NumberArray[2] = 10;
         NumberArray[3] = 10;
-        if (!digitalRead(Pin_rt1)&&!up)
+        if (!btn1&&!up)
         {
             up=true;
             tm.Year++;
@@ -823,7 +812,7 @@ void loop() // выполняется циклически
             tone(Buzz_1,100, 100);
             //  printConsoleTime();
         }
-        if (digitalRead(Pin_rt1)&&up) up=false;
+        if (btn1&&up) up=false;
         break;
     }
     for (uint8_t i=0; i<6; i++){
@@ -835,6 +824,16 @@ void loop() // выполняется циклически
     
 }
 
+
+//Функция ятения значений с кнопок
+/**
+ * Смена текущего статуса
+ * @return = 0 - ничего не произошло
+ *           1 - простой клик
+ *           2 - двойнок клик
+ *           3 - зажата кнопка
+ *           4 - отжата кнопка после долгого зажатия
+ */
 
 int changeButtonStatus(int buttonPin) {
     // Событие
@@ -1302,9 +1301,6 @@ void DisplayNumberString( uint8_t* array ) {    //Функция для отоб
 //////////////////////Отправка ответа на GET запрос////////////////////
 void sendReply(int ch_id)
 {
-
-
-
 
     // Serial.println("In Send Reply");
     header =  "HTTP/1.1 200 OK\r\n";
