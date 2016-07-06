@@ -51,8 +51,6 @@ DallasTemperature sensors(&oneWire);
 // arrays to hold device addresses
 DeviceAddress insideThermometer;
 
-
-
 //Блок общих переменных скетча
 // К155ИД1 (1)
 uint8_t Pin_1_a = 5;                
