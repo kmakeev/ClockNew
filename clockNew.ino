@@ -3,14 +3,15 @@
  */
 
 // #include <SoftwareSerial.h>
+// #include <Time.h>
+
 #include <ArduinoJson.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <DS1307RTC.h>
-#include <Time.h>
 #include "demo.h"
 
-HardwareSerial & ESPport = Serial;
+
 
 // Объявляем переменные и константы
 #define DEBUG false 
@@ -25,7 +26,12 @@ HardwareSerial & ESPport = Serial;
 #define OK 0
 #define ERR 1
 #define DATA 2 
+#define ssid "UIS2005"
+#define pass "P@ssw0rdQAZ"
+#define ntp "89.109.251.21"
+#define timeZone 3
 
+HardwareSerial &ESPport = Serial;
 
 char buffer[BUFFER_SIZE];
 char *pb;
@@ -40,7 +46,7 @@ String header;
 // вывод отладочной информации в консоль заккоментирован
 
 const int COM_BAUD = 9600;
-
+const int NTP_PACKET_SIZE = 48;        // NTP time stamp is in the first 48 bytes of the message
 
 // Setup a oneWire instance to communicate with any OneWire devices (not just Maxim/Dallas temperature ICs)
 OneWire oneWire(ONE_WIRE_BUS);
@@ -53,31 +59,31 @@ DeviceAddress insideThermometer;
 
 //Блок общих переменных скетча
 // К155ИД1 (1)
-uint8_t Pin_1_a = 5;                
-uint8_t Pin_1_b = 6;
-uint8_t Pin_1_c = 7;
-uint8_t Pin_1_d = 8;
+uint8_t Pin_2_a = 5;                
+uint8_t Pin_2_b = 6;
+uint8_t Pin_2_c = 7;
+uint8_t Pin_2_d = 8;
 
 // К155ИД1 (2)
-uint8_t Pin_2_a = 12;                
-uint8_t Pin_2_b = 13;
-uint8_t Pin_2_c = 4;
-uint8_t Pin_2_d = 2;
+uint8_t Pin_1_a = 13;                
+uint8_t Pin_1_b = 12;
+uint8_t Pin_1_c = 4;
+uint8_t Pin_1_d = 2;
 
 // Анодные пины
-uint8_t Pin_a_1 = 9;//колбы 1, 4
+uint8_t Pin_a_1 = 11;//колбы 1, 4
 uint8_t Pin_a_2 = 10;//колбы 2, 5
-uint8_t Pin_a_3 = 11; //колбы 3, 6       
+uint8_t Pin_a_3 = 9; //колбы 3, 6       
 
 //Пины для кнопок 
-uint8_t Pin_rt1 = A1;   //Пока будем использовать аналоговые как цифровые
-uint8_t Pin_rt2 = A2;  
+uint8_t Pin_rt1 = A0;   //Пока будем использовать аналоговые как цифровые
+uint8_t Pin_rt2 = A1;  
 
 //Пин для подсветки
 uint8_t Led_1 = 3; 
 
 //Пин для бипера
-int Buzz_1 = A0;           
+int Buzz_1 = A2;           
 
 
 //Массив для управления анодами ламп
@@ -86,16 +92,16 @@ static const uint8_t anods[3] = {Pin_a_1, Pin_a_2, Pin_a_3};
 //Массив с помощью которого дешефратору задаются цифры
 static const uint8_t numbers[11][4] = 
 {
-    { 0, 0, 0, 0 }, //0
-    { 1, 0, 0, 1 }, //1
-    { 1, 0, 0, 0 }, //2
-    { 0, 1, 1, 1 }, //3
-    { 0, 1, 1, 0 }, //4
-    { 0, 1, 0, 1 }, //5
-    { 0, 1, 0, 0 }, //6
-    { 0, 0, 1, 1 }, //7
-    { 0, 0, 1, 0 }, //8
-    { 0, 0, 0, 1 }, //9
+    { 0, 0, 0, 1 }, //0
+    { 0, 0, 1, 0 }, //1
+    { 0, 0, 1, 1 }, //2
+    { 0, 1, 0, 1 }, //3
+    { 1, 0, 0, 1 }, //4
+    { 1, 0, 0, 0 }, //5
+    { 0, 1, 1, 1 }, //6
+    { 0, 1, 1, 0 }, //7
+    { 0, 1, 0, 0 }, //8
+    { 0, 0, 0, 0 }, //9
     { 1, 1, 1, 1 }  //Чисто
 };
 
@@ -121,6 +127,7 @@ uint8_t mode = 0;
 uint8_t hours = 0;
 uint8_t Mins = 0;
 uint8_t Seconds  = 0;
+uint8_t Seconds_old = 0;
 uint8_t timeset = 0;
 uint8_t alarmclockset = 0;
 uint8_t alarmHour = 0;
@@ -130,14 +137,15 @@ uint8_t dayNight = 255;
 uint8_t btn1;
 uint8_t btn2;
     
-float tempC = 0;                    //(int)tempC/10
+float tempC = 0;                    
 bool sensorTemperatureIn = false;
 boolean isAlarm = false;
-boolean esp8266in = false;
+bool esp8266in = false;
 bool mode_auto = true;
-boolean play = false;
+// boolean play = false;
 
 uint8_t a;
+float b;
 uint8_t i=0, j=0, z=0;
 
 bool isReadTemperature = false;
@@ -146,6 +154,9 @@ boolean animate = false;
 // boolean sec = true;      //не используется
 
 tmElements_t tm;
+
+uint8_t dateTimeSet;         //Для установки времени/даты с телефона
+uint8_t alarmSet;
 
 unsigned long millisAnimation;               //Время начала шага анимации
 unsigned long millisThis;                    //Время сейчас
@@ -162,21 +173,30 @@ unsigned long currentButtonStatusStart1;  // Кол-во милисекунд о
 unsigned long currentButtonStatusStart2;  // Кол-во милисекунд от начала работы программы, когда начался статус 2    
 unsigned long currentButtonStatusStart3;  // Кол-во милисекунд от начала работы программы, когда начался статус 3
 
+long int time_;                           // Для отслеживания задержки при чтения из последовательного порта
 
 const int delayFalse = 10;                // Длительность, меньше которой не регистрируется единоразовый клик
 const int delayLongSingleClick = 1000;    // Длительность зажатия кнопки для выхода в режим увеличения громкости
 const int delayDeltaDoubleClick = 800;    // Длительность между кликами, когда будет зафиксирован двойной клик
 
-//Блок переменных для воспроизведения мелодии
-int freq[7][12] = {
-    {65, 69, 73, 78, 82, 87, 92, 98, 104, 110, 117, 123},                     //0 = Большая октава
-    {131, 139, 147, 156, 165, 175, 185, 196, 208, 220, 233, 247},             //1 = Малая октава
-    {262, 277, 294, 311, 330, 349, 370, 392, 415, 440, 466, 494},             //2 = 1-я октава
-    {523, 554, 587, 622, 659, 698, 740, 784, 831, 880, 932, 988},             //3 = 2-я октава
-    {1047, 1109, 1175, 1245, 1319, 1397, 1480, 1568, 1661, 1760, 1865, 1976}, //4 = 3-я октава
-    {2093, 2218, 2349, 2489, 2637, 2794, 2960, 3136, 3322, 3520, 3729, 3951}, //5 = 4-я октава
-    {4186, 4435, 4699, 4978, 5274, 5588, 5920, 6272, 6645, 7040, 7459, 7902}, //6 = 5-я октава
-};
+uint8_t time_hh;
+uint8_t time_mm;
+uint8_t time_ss;
+bool backward;
+bool isTimerOn;
+
+int changeButtonStatus(int buttonPin);
+void setNixieNum(uint8_t tube, uint8_t num);
+void DisplayNumberSet(uint8_t anod, uint8_t num1, uint8_t num2 );
+void DisplayNumberSetA(uint8_t anod, uint8_t num1, uint8_t num2 );
+void DisplayNumberString( uint8_t* array );
+void sendReply(int ch_id);
+void clearSerialBuffer(void);
+// void clearBuffer(void);
+uint8_t sendData(String command, const int timeout, boolean debug);
+void playMusic();
+time_t getNtpTime();
+bool notSync = true;
 
 
 void setup()  
@@ -204,8 +224,6 @@ void setup()
     
  //   analogWrite(Led_1, 1);
     digitalWrite(Buzz_1, 0);
-    
-
    sensors.begin();
     
     if (sensors.getAddress(insideThermometer, 0)) {
@@ -218,65 +236,70 @@ void setup()
     ESPport.begin(COM_BAUD);
     while(!ESPport){
     
-      }
-    if (sendData("AT+RST\r\n",3400,DEBUG)==OK){
- //   Serial.println("ok");
-  } else {
-//    Serial.println("error");
-  }
-  sendData("ATE0\r\n",500,DEBUG);  
-//  Serial.println("Configure as access point - ");        
-  if (sendData("AT+CWMODE=2\r\n",300,DEBUG)==OK){
- //   Serial.println("ok");
-  } else {
- //   Serial.println("error");
-  }
-//  Serial.println("Configure for multiple connections "); 
-  if (sendData("AT+CIPMUX=1\r\n",500,DEBUG)==OK){
- //   Serial.println("ok");
-  } else {
- //   Serial.println("error");   
-  }
-//  Serial.println("Turn on server on port 80  "); 
-  if (sendData("AT+CIPSERVER=1,80\r\n",1000,DEBUG)==OK){// turn on server on port 80
- //   Serial.println("ok");
-  esp8266in = true;
- } else {
-//    Serial.println("error");  
-  }
- // sendData("AT+CIPSTO=2",300, DEBUG); // Таймаут сервера 2 секунды
-//  Serial.println("Waiting for page request  "); 
-//  Serial.println("Get ip address  "); 
-  if (sendData("AT+CIFSR", 500, DEBUG)==OK){ // узнаём адрес
- //   Serial.print("ok");
-  } else {
-//    Serial.print("error");  
-  }
-
-    // Назначаем входные и выходные регистры
-    
-
-    
-
- 
+      } 
+    sendData("AT+RST\r\n",2000,DEBUG);
+    sendData("ATE1\r\n",500,DEBUG);    
+    /* //Как точка доступа     
+    sendData("AT+CWMODE=2\r\n",300,DEBUG);
+    sendData("AT+CIPMUX=1\r\n",500,DEBUG);
+    if (sendData("AT+CIPSERVER=1,80\r\n",1000,DEBUG)== OK){
+       esp8266in = true;
+     } else {
+      esp8266in = false; 
+     }
+*/
+    // Подключение к существующей точке
+    sendData("AT+CWMODE=3\r\n",500,DEBUG); 
+    sendData("AT+CWQAP\r\n",500,DEBUG);
+    // sendData("AT+CWLAP?\r\n", 1000, DEBUG);
+    sendData("AT+CWDHCP=1,1\r\n", 1000, DEBUG);
+    String cmd="AT+CWJAP=\"";
+    cmd+=ssid;
+    cmd+="\",\"";
+    cmd+=pass;
+    cmd+="\"";
+    cmd+="\r\n";
+    sendData(cmd, 3400,DEBUG);
+    // sendData("AT+CIFSR\r\n", 2000, DEBUG); // узнаём адрес
+    sendData("AT+CIPMUX=1\r\n",500,DEBUG);
+    if (sendData("AT+CIPSERVER=1,80\r\n",3000,DEBUG)== OK){
+       esp8266in = true;
+     } else {
+      esp8266in = false; 
+     }     
+  
 }
 
 
 void loop() // выполняется циклически
 {
   
-    StaticJsonBuffer<210> jsonBuffer;
+    StaticJsonBuffer<200> jsonBuffer;
     int ch_id, packet_len;
     
     // Работа с WiFi модулум esp8266
     //Чтение кнопок идет до обработки полученных данных через WiFi
    btn1 = digitalRead(Pin_rt1);
    btn2 = changeButtonStatus(Pin_rt2); 
-    
- 
-      
-    if (esp8266in && ESPport.available()){   // esp8266in    Если был получен успешный ответ о старте сервера
 
+   RTC.read(tm);
+   Mins = tm.Minute;
+   Seconds_old = Seconds;
+   Seconds = tm.Second;
+   hours = tm.Hour;
+
+   if ((Seconds==9) && (notSync)) {       //Запуск синхронизации времени один раз при наступлении 01 час
+    time_t t = getNtpTime();
+    RTC.set(t);
+    notSync = false;
+    }
+   if ((!notSync) && (Seconds!=9)) notSync = true; 
+   
+   
+      
+   if (esp8266in) {
+      if (ESPport.available()){   // esp8266in    Если был получен успешный ответ о старте сервера и есть что читать 
+        ESPport.setTimeout(400);
         ESPport.readBytesUntil('\n', buffer, BUFFER_SIZE);
         if (strncmp(buffer,"+IPD,", 5)==0) {         //Сравниваем считанное с  "+IPD,".
             //    Serial.println("Incomming connection");
@@ -299,8 +322,8 @@ void loop() // выполняется циклически
                 root["dd"] = tm.Day;
                 root["mm"] = tm.Month;
                 root["yy"] = tmYearToY2k(tm.Year);
-                root["tset"] = timeset;
-                root["alSet"] = alarmclockset;
+                // root["tset"] = timeset;
+                // root["alSet"] = alarmclockset;
                 root["m_a"] = mode_auto;
                 root["led"] = dayNight;
                 root["tC"] = tempC;                    //(int)tempC/10
@@ -308,16 +331,21 @@ void loop() // выполняется циклически
                 root["isAl"] = isAlarm;
                 root["alHour"] = alarmHour;
                 root["alMin"] = alarmMin;
-                root["btn1"] = btn1;
-                root["btn2"] = btn2;
-                root["play"] = play;
-                
+                // root["btn1"] = btn1;
+                // root["btn2"] = btn2;
+                // root["play"] = play;
+                root["isT"] = isTimerOn;
+                root["tHH"] = time_hh;
+                root["tMM"] = time_mm;
+                root["tSS"] = time_ss;
+                root["tBd"] = backward;
+ 
                 root.printTo(content);
                 sendReply(ch_id);
             } else if((strncmp(pb, "PUT / ", 6) == 0) || (strncmp(pb, "SET /?", 6) == 0))
             {
-                long int time = millis();
-                while( (time+400) > millis())
+                time_ = millis();
+                while( (time_ + 400) > millis())
                 {
                     while(ESPport.available())
                     {
@@ -334,32 +362,50 @@ void loop() // выполняется циклически
                                   // hours = root["hours"];
                                   // Mins = root["mins"];
                                   // Seconds = root["sec"];
-                                  timeset = root["tset"];
-                                  alarmclockset = root["alSet"];
+                                  isAlarm = root["isAl"];
+                                  alarmSet = root["alSet"];
+                                  if (alarmSet==1) {
+                                    alarmHour = root["alHour"];
+                                    alarmMin = root["alMin"];
+                                  }
+                                  // alarmclockset = root["alSet"];
+                                  dateTimeSet = root["tset"];
+                                  if (dateTimeSet==1){
+                                   tm.Hour = root["hh"];    
+                                   tm.Minute = root["min"];  
+                                   tm.Second = root["sec"];
+                                   RTC.write(tm);
+                                  } else if (dateTimeSet==2) {
+                                   tm.Day = root["dd"];
+                                   tm.Month = root["mm"];
+                                   tm.Year = y2kYearToTm(int(root["yy"]));
+                                   RTC.write(tm);
+                                  }
+                                  
                                   mode_auto = root["m_a"];
                                   dayNight = root["led"];
-                                  //  tempC = root["tC"];                    //(int)tempC/10
-                                  //  sensorTemperatureIn = root["sIn"];
-                                  isAlarm = root["isAl"];
-                                  // alarmHour = root["alHour"];
-                                  // alarmMin = root["alMin"];
-                                  play = root["play"];
+                                  // play = root["play"];
+                                  isTimerOn = root["isT"];
+                                  backward = root["tBd"];
+                                  if (isTimerOn) {
+                                    time_hh = root["tHH"];
+                                    time_mm = root["tMM"];
+                                    time_ss = root["tSS"];
+                                  }
                                 }                            
-                            } else {
-                                // Serial.println();
-                                // Serial.println("Parsing ERROR");
-                            }
+                            } 
                              isReadTemperature = false;  //Для однократного чтения температуры при получении пакета.
                         }
-                        clearBuffer();
+                        memset(buffer, 0, BUFFER_SIZE);
                         delay(20);
                     }
                 }
                 content = "";
                 sendReply(ch_id);
             }
-            clearBuffer();
+            memset(buffer, 0, BUFFER_SIZE);
         }
+      }    
     }
     //Счетчик для анимации
     if (z==DELAY_ANIMATION)
@@ -369,11 +415,6 @@ void loop() // выполняется циклически
     }
     if (j==10) {animate=false; j=0; z=0;}
     if (animate) z++;
-
-    RTC.read(tm);
-    Mins = tm.Minute;
-    Seconds = tm.Second;
-    hours = tm.Hour;
 
     if (isAlarm) {                 //если установлен будильник горят точки
      //   digitalWrite(Pin_dot1, HIGH);
@@ -387,14 +428,47 @@ void loop() // выполняется циклически
         digitalWrite(Pin_dot1, LOW);
         digitalWrite(Pin_dot2, LOW);
     }*/
-    if (dayNight!=1){                              // Единицу присылаем из проложения - это равносильно выключению, 
+    if (dayNight!=0){                              // Единицу присылаем из проложения - это равносильно выключению, 
                                                     // В остальных случаях подсветку устанавливаем по времени 
       if((tm.Hour>=8)&&(tm.Hour<20)) dayNight=255;
       if((tm.Hour>=20)&&(tm.Hour<22)) dayNight=40;
       if((tm.Hour>=22)&&(tm.Hour<0)) dayNight=10;
-      if((tm.Hour>=0)&&(tm.Hour<8)) dayNight=0;
+      if((tm.Hour>=0)&&(tm.Hour<8)) dayNight=1;  //1
     }
     analogWrite(Led_1, dayNight);  
+
+// Работа таймера
+    //Если включен таймер
+    if (isTimerOn) {
+      // Если изменилась секунда
+      if  (Seconds_old != Seconds) {
+       //Считаем в прямом режиме
+       if (!backward) {
+         time_ss += 1;
+         if (time_ss==60){
+          time_ss = 0;
+          time_mm +=1;
+          if (time_mm==60){
+            time_mm = 0;
+            time_hh +=1;
+          }
+         }
+       } else {
+         time_ss -= 1;
+        if (time_ss==255) {
+          time_ss = 59;
+          time_mm -= 1;
+          if (time_mm == 255) {
+            time_mm = 59;
+            time_hh -= 1;
+            if (time_hh == 255) {
+              time_hh = 99;
+            }
+          }
+        }
+       }
+      }
+    }
 
     switch(mode)
     {
@@ -460,7 +534,7 @@ void loop() // выполняется циклически
                 sensors.requestTemperatures();
                 tempC = sensors.getTempC(insideThermometer);            // Поправка введена в связи с неточностью работы датчика
                 isReadTemperature = true;
-                float b = (tempC - int(tempC))*100;
+                b = (tempC - int(tempC))*100;
                 //Serial.println((int)b/10);
                 //Serial.println((int)b%10);
                 NumberArray[0] = (int)tempC/10; //Первый
@@ -476,10 +550,7 @@ void loop() // выполняется циклически
             millisThis = millis();
             if(millisThis - millisAnimation > 700) {  //Если пауза вышла двигаем колбы влево
                 
-                //   for (uint8_t i=0; i<6; i++) {
-                //     NumberArray[i] = NumberAnimationArray[a][i];         //устанавливаем значения колб для анимации
-                // }
-                uint8_t a = NumberArray[0];
+                a = NumberArray[0];
                 NumberArray[0] = NumberArray[1];        //пусто
                 NumberArray[1] = NumberArray[2];        //пусто
                 NumberArray[2] = NumberArray[3]; //Первый
@@ -488,18 +559,16 @@ void loop() // выполняется циклически
                 NumberArray[5] = a;
                 millisAnimation = millisThis;
             }
-
-
         }
         else mode = 0;
         break;
 
     case 4:                      //режим анимации
         //  if(a < NUMITEMS(NumberAnimationDelay)){                   //не первышаем количество шагов анимации
-        if(a < 130){
+        if(a < 1){                                                    //тут должно быть количество шагов анимации
             //   Serial.println("Animation step ");
             //   Serial.println("a");
-            for (uint8_t i=0; i<6; i++) {
+            for (i=0; i<6; i++) {
                 NumberArray[i] = NumberAnimationArray[a][i];         //устанавливаем значения колб для анимации
             }
 
@@ -515,7 +584,16 @@ void loop() // выполняется циклически
         //    playMusic();                                                //Включаем музыку
         }
         break;
-     case 5:            //Режим выключения ламп, тупо подаем 10 на дешифраторы и ничего на них не отображаем
+     case 5:            //Режим отображения таймера
+        
+        NumberArray[0] = time_hh / 10; //Первый знак часа
+        NumberArray[1] = time_hh % 10; //Второй знак часа
+        NumberArray[2] = time_mm / 10; //Первый знак минут
+        NumberArray[3] = time_mm % 10; //Второй знак минут
+        NumberArray[4] = time_ss / 10; //Первый знак секунд
+        NumberArray[5] = time_ss % 10; //Второй знак секунд
+        break;   
+     case 6:            //Режим выключения ламп, тупо подаем 10 на дешифраторы и ничего на них не отображаем
         
         NumberArray[0] = 10; 
         NumberArray[1] = 10; 
@@ -538,7 +616,7 @@ void loop() // выполняется циклически
         //   sec=true;
         // }
         //Каждые 58 секунд включаем время
-     if (mode_auto)     //Если выбран режим авто смены 
+     if (mode_auto&&mode < 5)     //Если выбран режим авто смены и мы не в режимах 5, 6
        {
         if (Seconds==58)
         {
@@ -575,7 +653,7 @@ void loop() // выполняется циклически
             animate=true;
             tone(Buzz_1,100, 100);
             mode++;
-            mode %= 6;
+            mode %= 7;          //перебор всех режимов отображения 
             if (mode==4) {      //Если перешли к демо режиму
                 animate=false;    //обычную анимацию отключаем
                 a=0;              //переход к первому шагу анимации
@@ -813,13 +891,13 @@ void loop() // выполняется циклически
         if (btn1&&up) up=false;
         break;
     }
-    for (uint8_t i=0; i<6; i++){
+    for (i=0; i<6; i++){
         if  (NumberArray[i]!=NumberArrayOLD[i]) isChangeArray[i] = true;       //Произошло изменение значения для отображения, нужно его анимировать
         NumberArrayOLD[i] = NumberArray[i];                                   //Сохраняем текущее значение на следующий цикл как старое
     }
     
+    //Отображение на индикаторы
     DisplayNumberString( NumberArray );
-    
 }
 
 
@@ -977,265 +1055,9 @@ int changeButtonStatus(int buttonPin) {
     return event;
 }
 
-
-int extractNumber(int& myNumber, char Muz[], int& curPosition)
-{
-    int digitsNumber=0;
-    int curDigit=0;
-    myNumber=0;
-    do
-    {
-        if ((Muz[curPosition]> 47) && (Muz[curPosition]<58)) // Коды ASCII цифр '0' == 48 , "9' == 57
-        {
-            curDigit=Muz[curPosition]-48;
-            digitsNumber++;
-            myNumber=myNumber*10+curDigit;
-        }
-        else
-        {
-            return digitsNumber;
-        }
-        curPosition++;
-    }while(Muz[curPosition]!= '\0');
-    return digitsNumber;
-}
-
-int pointsCount(char Muz[], int& curPosition)
-{
-    int pointsNumber=0;
-    do
-    {
-        if (Muz[curPosition]== '.')
-        {
-            pointsNumber++;
-        }
-        else
-        {
-            return pointsNumber;
-        }
-        curPosition++;
-    }while(Muz[curPosition]!= '\0');
-    return pointsNumber;
-}
-
-void Qb_PLAY(char Muz[])
-{
-    static int generalOktava;
-    int oktava;
-    static int tempo=120; // Задание темпа или четвертных нот, которые исполняются в минуту. n от 32 до 255. По умолчанию 120
-    int Nota=0;
-    int  curPosition, curNota4;
-    unsigned long currentNotaPauseDuration;
-    unsigned long currentNotaDuration;
-    unsigned long  pauseDuration;
-    int takt=240000/tempo;
-    bool isNota;
-    bool isPause;
-    int pointsNum=0;
-    float generalNotaMultipl=0.875;
-    static float NotaLong;
-    float curMultipl;
-    float tempFlo;
-    float curPause;
-    unsigned long tempLong;
-    int i=0;
-    do
-    {
-        isNota=false;
-        isPause=false;
-        oktava=generalOktava;
-        switch(Muz[i]){
-        case '\0':{
-            return;
-        }
-            break;
-        case 'C':{
-            Nota=0;
-            isNota=true;
-        }
-            break;
-        case 'D':{
-            Nota=2;
-            isNota=true;
-        }
-            break;
-        case 'E':{
-            Nota=4;
-            isNota=true;
-        }
-            break;
-        case 'F':{
-            Nota=5;
-            isNota=true;
-        }
-            break;
-        case 'G':{
-            Nota=7;
-            isNota=true;
-        }
-            break;
-        case 'A':{
-            Nota=9;
-            isNota=true;
-        }
-            break;
-        case 'B':{
-            Nota=11;
-            isNota=true;
-        }
-            break;
-        case 'N':{// Nнота  Играет определенную ноту (0 - 84) в диапазоне семи октав (0 - пауза).
-            curPosition=i+1;
-            if (extractNumber(curNota4, Muz, curPosition)){
-                i=curPosition-1;
-                if (curNota4){
-                    curNota4--;
-                    oktava=curNota4 / 12;
-                    Nota=curNota4 % 12;
-                    isNota=true;
-                }
-                else{
-                    isPause=true;
-                }
-            }
-        }
-            break;
-        case 'O':{ //Oоктава Задает текущую октаву (0 - 6).
-            curPosition=i+1;
-            if (extractNumber(oktava, Muz, curPosition)){
-                i=curPosition-1;
-                generalOktava=oktava;
-            }
-        }
-            break;
-        case '>':{
-            generalOktava++;
-        }
-            break;
-        case '<':{
-            generalOktava--;
-        }
-            break;
-        case 'M':{
-            switch(Muz[i+1]){
-            case 'N':{ //MN  Нормаль. Каждая нота звучит 7/8 времени, заданного в команде L
-                generalNotaMultipl=0.875; //  =7/8
-                i++;
-            }
-                break;
-            case 'L':{ //ML  Легато. Каждая нота звучит полный интервал времени, заданного в команде L
-                generalNotaMultipl=1.0;
-                i++;
-            }
-                break;
-            case 'S':{ //MS  Стаккато. Каждая нота звучит 3/4 времени, заданного в команде L
-                generalNotaMultipl=0.75;  // =3/4
-                i++;
-            }
-                break;
-            case 'F':{ //MF Режим непосредственного исполнения. Т.е. на время проигрывания ноты программа приостанавливается. Используется по умолчанию
-                i++;   //Сдвигаем точку чтения и ничего не делаем.
-            }
-                break;
-
-            case 'B':{ //MB проигрывние в буффер
-                i++;   //Сдвигаем точку чтения и ничего не делаем.
-            }
-                break;
-            }
-        }
-            break;
-        case 'L':{ //Lразмер Задает длительность каждой ноты (1 - 64). L1 - целая нота, L2 - 1/2 ноты и т.д.
-            curPosition=i+1;
-            if (extractNumber(curNota4, Muz, curPosition)){
-                i=curPosition-1;
-                tempFlo=float(curNota4);
-                NotaLong=1/tempFlo;
-            }
-        }
-            break;
-        case 'T':{ //Tтемп Задает темп исполнения в четвертях в минуту (32-255).По умолчанию 120
-            curPosition=i+1;
-            if (extractNumber(tempo, Muz, curPosition)){
-                i=curPosition-1;
-                takt=240000/tempo; // миллисекунд на 1 целую ноту. 240000= 60 сек * 1000 мсек/сек *4 четвертей в ноте
-            }
-        }
-            break;
-        case 'P':{ //Pпауза  Задает паузу (1 - 64). P1 - пауза в целую ноту, P2 - пауза в 1/2 ноты и т.д.
-            curPosition=i+1;
-            if (extractNumber(curNota4, Muz, curPosition)){
-                tempFlo=float(curNota4);
-                curPause=1/tempFlo;
-                i=curPosition-1;
-                isPause=true;
-            }
-        }
-            break;
-        case ' ':{ //Есть в некоторых текстах. Вероятно это пауза длительностью в текущую ноту
-            curPause= NotaLong;
-            isPause=true;
-        }
-            break;
-        }
-        if (isNota){
-            switch(Muz[i+1]){
-            case '#':{ // диез
-                Nota++;
-                i++;
-            }
-                break;
-            case '+':{ // диез
-                Nota++;
-                i++;
-            }
-                break;
-            case '-':{ // бемоль
-                Nota--;
-                i++;
-            }
-                break;
-            }
-            curPosition=i+1;
-            if (extractNumber(curNota4, Muz, curPosition)){
-                currentNotaDuration=takt/curNota4;
-                i=curPosition-1;
-            }
-        }
-        if (oktava<0) oktava=0;
-        if (oktava>6) oktava=6;
-        if (isNota || isPause){
-            curPosition=i+1;
-            pointsNum=pointsCount(Muz, curPosition);
-            if (pointsNum) i=curPosition-1;
-            curMultipl=1.0;
-            for (int j=1; j<=pointsNum; j++) {
-                curMultipl= curMultipl * 1.5;
-            }
-            currentNotaPauseDuration=(takt*NotaLong);
-        }
-        if (isNota){
-            curMultipl=curMultipl*generalNotaMultipl;
-            currentNotaDuration= (currentNotaPauseDuration*curMultipl);
-            if (Nota<0) Nota=0;
-            if (Nota>11) Nota=11;
-            tempLong= freq[oktava][Nota];
-            tone(Buzz_1,tempLong,currentNotaDuration);
-            // DisplayNumberString(NumberArray);    //Будем при игре каждой ноты еще показывать последнее содержимое массива колб
-            delay(currentNotaPauseDuration);
-        }
-        if (isPause){
-            pauseDuration=takt*curPause*curMultipl;
-            delay(pauseDuration);
-        }
-        i++;
-    } while (Muz[i]!= '\0');
-}
-
-
 void setNixieNum(uint8_t tube, uint8_t num) {             //Отображает цифру num на лампе из групп 1 или 2  
 
-    for(uint8_t i=0; i<4; i++)
+    for(i=0; i<4; i++)
     {
         digitalWrite(bits[tube][i], LOW);//боримся против глюков - обнуляем
         if (!animate) digitalWrite(bits[tube][i], numbers[num][i]);
@@ -1275,7 +1097,7 @@ void DisplayNumberSetA(uint8_t anod, uint8_t num1, uint8_t num2 ) {
     delay(DELAY_SHOW);
     analogWrite(anods[anod], 0);   //Убираем ШИМ мигнал
 
-    for (uint8_t i=0; i<6; i++){
+    for (i=0; i<6; i++){
         if (ShimAnimationArray[i]<MAX_SHIM_FOR_ANIMATION) ShimAnimationArray[i]=ShimAnimationArray[i] + DELTA_SHIM_FOR_ANIMATION;    //Если ведется анимация, то увеличиваем значение ШИМ сигнала
         else ShimAnimationArray[i]=255;
     }
@@ -1322,65 +1144,39 @@ void sendReply(int ch_id)
         ESPport.print(content);
         delay(200);
     } 
-    
-/*
-    clearBuffer();
-
-    long int time = millis();
-    i = 0;
-    while( (time+100) > millis())
-    {
-        while(ESPport.available() && i < BUFFER_SIZE )
-        {
-            buffer[i] = ESPport.read(); // read the next character.
-            i++;
-        }
-    }
-    // Serial.print(buffer);
-
-    if (strstr(buffer, ">") != 0) {
-        //  Serial.println("Read > ");
-        ESPport.print(header);
-        ESPport.print(content);
-        delay(200);
-    } else {
-        //    Serial.println(" NOT Read > ");
-        ESPport.println("+++");
-    }
-
-   */
 }
 
 //////////////////////очистка ESPport////////////////////
 void clearSerialBuffer(void)
 {
-    while (ESPport.available() > 0 )
+    time_ = millis();
+    while (((time_ + 400) > millis()) && ESPport.available())
     {
         ESPport.read();
     }
 }
-
+/*
 ////////////////////очистка буфера////////////////////////
 void clearBuffer(void) {
-    for (i =0;i<BUFFER_SIZE;i++ )
+    for (i = 0;i<BUFFER_SIZE;i++ )
     {
         buffer[i]=0;
     }
 }
-
+*/
 ////////////////////Отправка данных в ESP////////////////////////
 uint8_t sendData(String command, const int timeout, boolean debug)
 {
 
     //   Serial.println("In send Data");
     //   Serial.println(command);
-    clearBuffer();
+    memset(buffer, 0, BUFFER_SIZE);
 
     ESPport.print(command);           // send the read character to the esp8266
     
-    long int time = millis();
+    time_ = millis();
     i = 0;
-    while( (time+timeout) > millis())
+    while( (time_+timeout) > millis())
     {
         while(ESPport.available() && i < BUFFER_SIZE )
         {
@@ -1406,9 +1202,95 @@ void playMusic()
     analogWrite(anods[0], 0);
     analogWrite(anods[1], 0);
     analogWrite(anods[2], 0);
-    Qb_PLAY ("MST255L2O2E.L4F+L2G.L4EGGF+EL2F+L4<BP4L2>F+.L4GL2A.L4F+");
-    Qb_PLAY ("AAGF+L1EL2B>EDL4EDCC<BAL2BEP4>CL4<AL2B.L4GF+<B>GF+L1E");
-    Qb_PLAY ("L2B>EDL4EDCC<BAL2BEP4>CL4<AL2B.L4GF+<B>GF+L1E");
+ //   Qb_PLAY ("MST255L2O2E.L4F+L2G.L4EGGF+EL2F+L4<BP4L2>F+.L4GL2A.L4F+");
+ //   Qb_PLAY ("AAGF+L1EL2B>EDL4EDCC<BAL2BEP4>CL4<AL2B.L4GF+<B>GF+L1E");
+ //   Qb_PLAY ("L2B>EDL4EDCC<BAL2BEP4>CL4<AL2B.L4GF+<B>GF+L1E");
+}
+
+time_t getNtpTime()
+{
+  String close_ = "AT+CIPCLOSE=0\r\n";
+  String cmd = "AT+CIPSTART=0,\"UDP\",\"";
+  cmd += ntp;
+  cmd += "\",123\r\n";
+  sendData(cmd, 2000, DEBUG);
+  delay(500);
+  memset(buffer, 0, BUFFER_SIZE); 
+  // Initialize values needed to form NTP request
+  // (see URL above for details on the packets) 
+  buffer[0] = 0b11100011; // LI, Version, Mode
+  buffer[1] = 0; // Stratum, or type of clock
+  buffer[2] = 6; // Polling Interval
+  buffer[3] = 0xEC; // Peer Clock Precision 
+ // 8 bytes of zero for Root Delay & Root Dispersion
+  buffer[12] = 49;
+  buffer[13] = 0x4E;
+  buffer[14] = 49;
+  buffer[15] = 52;
+  // Serial.println("Send request");
+  Serial.print("AT+CIPSEND=0,");
+  Serial.println(NTP_PACKET_SIZE);
+  delay(20);
+  if (Serial.find(">"))
+  {
+    // Serial.println("Read >");
+    for (i = 0; i < NTP_PACKET_SIZE; i++) 
+    {
+    Serial.write(buffer[i]);
+    delay(5);
+    } 
+    memset(buffer, 0, NTP_PACKET_SIZE);  
+    // Serial.println("Server answer : ");
+    i = 0;
+  
+    if (Serial.find("+IPD,0,48:"))
+    {
+      // Serial.println("Found +IPD,48:");
+      time_ = millis();  
+      while( (time_+500) > millis())
+      {
+          while((Serial.available()) && (i < NTP_PACKET_SIZE))
+          {
+              byte ch = Serial.read();
+              // if (ch < 0x10) Serial.print('0');
+              // Serial.print(ch,HEX);
+              // Serial.print(' ');
+              // if ( (((i+1) % 15) == 0) ) { Serial.println(); }
+              buffer[i] = ch; // read the next character.
+              i++;
+              delay(5);           
+          }
+      }
+      // Serial.println();
+      // Serial.print("Read bytes - ");
+      // Serial.println(i);
+      if (i == NTP_PACKET_SIZE) {
+       /*Serial.println();
+       Serial.print(buffer[40],HEX);
+       Serial.print(" ");
+       Serial.print(buffer[41],HEX);
+       Serial.print(" ");
+       Serial.print(buffer[42],HEX);
+       Serial.print(" ");
+       Serial.print(buffer[43],HEX);
+       Serial.print(" = ");
+       */
+      Serial.println(close_);
+      unsigned long highWord = word(buffer[40], buffer[41]);
+      unsigned long lowWord = word(buffer[42], buffer[43]);
+      unsigned long secsSince1900 = highWord << 16 | lowWord;
+      return  secsSince1900- 2208988800UL + 3600*timeZone;
+     }      
+  } else {
+      // Serial.println("Not Found +IPD,48:");
+      Serial.println(close_);
+      return 0;
+      }
+  } else {
+      // Serial.println("No answer to server ");
+   }
+  Serial.println(close_);
+  return 0; 
 }
 
 
