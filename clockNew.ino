@@ -10,12 +10,13 @@
 #include <DallasTemperature.h>
 #include <DS1307RTC.h>
 #include "demo.h"
+#include <avr/wdt.h>
 
 
 
 // Объявляем переменные и константы
 #define DEBUG false 
-#define BUFFER_SIZE 200
+#define BUFFER_SIZE 180
 #define NUMITEMS(arg) ((size_t) (sizeof (arg) / sizeof (arg [0])))
 #define ONE_WIRE_BUS A3                //Это вывод для подключения вывода DS, при распайке на плате RTS1703 датчика температуры                  
 #define TEMPERATURE_PRECISION 9
@@ -26,17 +27,12 @@
 #define OK 0
 #define ERR 1
 #define DATA 2 
-#define ssid "UIS2005"
-#define pass "P@ssw0rdQAZ"
+#define ssid "home3"
+#define pass "xxxxx"
 #define ntp "89.109.251.21"
 #define timeZone 3
 
 HardwareSerial &ESPport = Serial;
-
-char buffer[BUFFER_SIZE];
-char *pb;
-String content;
-String header;
 
 
 // SoftwareSerial esp8266(8, 9); // RX, TX
@@ -59,31 +55,31 @@ DeviceAddress insideThermometer;
 
 //Блок общих переменных скетча
 // К155ИД1 (1)
-uint8_t Pin_2_a = 5;                
-uint8_t Pin_2_b = 6;
-uint8_t Pin_2_c = 7;
-uint8_t Pin_2_d = 8;
+const uint8_t Pin_2_a = 5;                
+const uint8_t Pin_2_b = 6;
+const uint8_t Pin_2_c = 7;
+const uint8_t Pin_2_d = 8;
 
 // К155ИД1 (2)
-uint8_t Pin_1_a = 13;                
-uint8_t Pin_1_b = 12;
-uint8_t Pin_1_c = 4;
-uint8_t Pin_1_d = 2;
+const uint8_t Pin_1_a = 13;                
+const uint8_t Pin_1_b = 12;
+const uint8_t Pin_1_c = 4;
+const uint8_t Pin_1_d = 2;
 
 // Анодные пины
-uint8_t Pin_a_1 = 11;//колбы 1, 4
-uint8_t Pin_a_2 = 10;//колбы 2, 5
-uint8_t Pin_a_3 = 9; //колбы 3, 6       
+const uint8_t Pin_a_1 = 11;//колбы 1, 4
+const uint8_t Pin_a_2 = 10;//колбы 2, 5
+const uint8_t Pin_a_3 = 9; //колбы 3, 6       
 
 //Пины для кнопок 
-uint8_t Pin_rt1 = A0;   //Пока будем использовать аналоговые как цифровые
-uint8_t Pin_rt2 = A1;  
+const uint8_t Pin_rt1 = A0;   //Пока будем использовать аналоговые как цифровые
+const uint8_t Pin_rt2 = A1;  
 
 //Пин для подсветки
-uint8_t Led_1 = 3; 
+const uint8_t Led_1 = 3; 
 
 //Пин для бипера
-int Buzz_1 = A2;           
+const int Buzz_1 = A2;           
 
 
 //Массив для управления анодами ламп
@@ -146,10 +142,10 @@ bool mode_auto = true;
 
 uint8_t a;
 float b;
-uint8_t i=0, j=0, z=0;
+uint8_t i=0, j=0, z=0, y=0;
 
 bool isReadTemperature = false;
-boolean up = false;         //Признак нажатия лглй из кнопок
+boolean up = false;         //Признак нажатия любойй из кнопок
 boolean animate = false;
 // boolean sec = true;      //не используется
 
@@ -179,11 +175,18 @@ const int delayFalse = 10;                // Длительность, мень�
 const int delayLongSingleClick = 1000;    // Длительность зажатия кнопки для выхода в режим увеличения громкости
 const int delayDeltaDoubleClick = 800;    // Длительность между кликами, когда будет зафиксирован двойной клик
 
-uint8_t time_hh;
-uint8_t time_mm;
-uint8_t time_ss;
-bool backward;
-bool isTimerOn;
+uint8_t time_hh = 0 ;
+uint8_t time_mm = 0;
+uint8_t time_ss = 0;
+bool backward = false;
+bool isTimerOn = false;
+bool notSync = true;
+
+char send_[] = {"AT+CIPSEND="};
+char buffer[BUFFER_SIZE];
+char *pb;
+
+time_t t;
 
 int changeButtonStatus(int buttonPin);
 void setNixieNum(uint8_t tube, uint8_t num);
@@ -196,9 +199,10 @@ void clearSerialBuffer(void);
 uint8_t sendData(String command, const int timeout, boolean debug);
 void playMusic();
 time_t getNtpTime();
-bool notSync = true;
 
-
+// String header;
+  String content;
+  
 void setup()  
 {
 
@@ -223,9 +227,9 @@ void setup()
     pinMode(Pin_rt2, INPUT);
     
  //   analogWrite(Led_1, 1);
-    digitalWrite(Buzz_1, 0);
+ //   digitalWrite(Buzz_1, 0);
    sensors.begin();
-    
+   wdt_disable(); 
     if (sensors.getAddress(insideThermometer, 0)) {
         sensorTemperatureIn = true;
         sensors.setResolution(insideThermometer, TEMPERATURE_PRECISION);
@@ -238,8 +242,9 @@ void setup()
     
       } 
     sendData("AT+RST\r\n",2000,DEBUG);
-    sendData("ATE1\r\n",500,DEBUG);    
-    /* //Как точка доступа     
+    // sendData("ATE1\r\n",500,DEBUG);  
+    /*  
+     //Как точка доступа     
     sendData("AT+CWMODE=2\r\n",300,DEBUG);
     sendData("AT+CIPMUX=1\r\n",500,DEBUG);
     if (sendData("AT+CIPSERVER=1,80\r\n",1000,DEBUG)== OK){
@@ -248,9 +253,10 @@ void setup()
       esp8266in = false; 
      }
 */
+    
     // Подключение к существующей точке
-    sendData("AT+CWMODE=3\r\n",500,DEBUG); 
-    sendData("AT+CWQAP\r\n",500,DEBUG);
+    sendData("AT+CWMODE=3\r\n",1000,DEBUG); 
+    // sendData("AT+CWQAP\r\n",500,DEBUG);
     // sendData("AT+CWLAP?\r\n", 1000, DEBUG);
     sendData("AT+CWDHCP=1,1\r\n", 1000, DEBUG);
     String cmd="AT+CWJAP=\"";
@@ -260,22 +266,24 @@ void setup()
     cmd+="\"";
     cmd+="\r\n";
     sendData(cmd, 3400,DEBUG);
-    // sendData("AT+CIFSR\r\n", 2000, DEBUG); // узнаём адрес
+    sendData("AT+CIFSR\r\n", 2000, DEBUG); // получаем адрес
     sendData("AT+CIPMUX=1\r\n",500,DEBUG);
-    if (sendData("AT+CIPSERVER=1,80\r\n",3000,DEBUG)== OK){
+    if (sendData("AT+CIPSERVER=1,80\r\n",2000,DEBUG)== OK){
        esp8266in = true;
      } else {
       esp8266in = false; 
-     }     
+     }    
+    wdt_enable(WDTO_8S);        //Установка тамера для перезагрузки при подвисании программы
   
 }
 
 
 void loop() // выполняется циклически
 {
-  
-    StaticJsonBuffer<200> jsonBuffer;
+    wdt_reset();                                //Циклический сброс таймера 
+    StaticJsonBuffer<170> jsonBuffer;
     int ch_id, packet_len;
+  
     
     // Работа с WiFi модулум esp8266
     //Чтение кнопок идет до обработки полученных данных через WiFi
@@ -287,19 +295,19 @@ void loop() // выполняется циклически
    Seconds_old = Seconds;
    Seconds = tm.Second;
    hours = tm.Hour;
-
-   if ((Seconds==9) && (notSync)) {       //Запуск синхронизации времени один раз при наступлении 01 час
-    time_t t = getNtpTime();
-    RTC.set(t);
-    notSync = false;
-    }
-   if ((!notSync) && (Seconds!=9)) notSync = true; 
    
-   
-      
    if (esp8266in) {
+    if ((hours==00) && (notSync)) {       //Запуск синхронизации времени один раз при наступлении 01 час
+      t = getNtpTime();
+      if (t !=0) {
+        RTC.set(t);
+        notSync = false;
+        }
+      }
+   if ((!notSync) && (hours!=00)) notSync = true; 
       if (ESPport.available()){   // esp8266in    Если был получен успешный ответ о старте сервера и есть что читать 
-        ESPport.setTimeout(400);
+        // ESPport.setTimeout(400);
+        memset(buffer, 0, BUFFER_SIZE);
         ESPport.readBytesUntil('\n', buffer, BUFFER_SIZE);
         if (strncmp(buffer,"+IPD,", 5)==0) {         //Сравниваем считанное с  "+IPD,".
             //    Serial.println("Incomming connection");
@@ -341,7 +349,7 @@ void loop() // выполняется циклически
                 root["tBd"] = backward;
  
                 root.printTo(content);
-                sendReply(ch_id);
+                // sendReply(ch_id);
             } else if((strncmp(pb, "PUT / ", 6) == 0) || (strncmp(pb, "SET /?", 6) == 0))
             {
                 time_ = millis();
@@ -401,12 +409,51 @@ void loop() // выполняется циклически
                     }
                 }
                 content = "";
-                sendReply(ch_id);
+                // sendReply(ch_id);
             }
             memset(buffer, 0, BUFFER_SIZE);
+            char h1[] =  "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\nContent-Length: ";
+            i=0;
+            y=0;
+            while (h1[i]!= 0) {
+              buffer[y] = h1[i];
+              i++;
+              y++;
+            }         
+            String len = String(content.length());
+            char h2[4];
+            len.toCharArray(h2, 4);
+            i = 0;
+            while (h2[i]!= 0) {
+              buffer[y] = h2[i];
+              i++;
+              y++;
+            } 
+            i = 0;
+            char h3[] = "\r\n\r\n";
+            while (h3[i]!= 0) {
+              buffer[y] = h3[i];
+              i++;
+              y++;
+            }
+        
+            ESPport.print(send_); // ответ клиенту
+            ESPport.print(ch_id);
+            ESPport.print(",");
+            ESPport.println(y + content.length());
+        
+            delay(20);
+            if (ESPport.find(">")) {
+                //  Serial.println("Read > ");
+                ESPport.print(buffer);
+                ESPport.print(content);
+                delay(200);
+                }
+         memset(buffer, 0, BUFFER_SIZE);
         }
       }    
     }
+    
     //Счетчик для анимации
     if (z==DELAY_ANIMATION)
     {
@@ -598,7 +645,7 @@ void loop() // выполняется циклически
         NumberArray[0] = 10; 
         NumberArray[1] = 10; 
         NumberArray[2] = 10; 
-        NumberArray[3] = 10;       
+        NumberArray[3] = 10;    //   
         NumberArray[4] = 10;        
         NumberArray[5] = 10;
         break;
@@ -1117,7 +1164,7 @@ void DisplayNumberString( uint8_t* array ) {    //Функция для отоб
     }
 }
 
-
+/*
 //////////////////////Отправка ответа на GET запрос////////////////////
 void sendReply(int ch_id)
 {
@@ -1132,7 +1179,7 @@ void sendReply(int ch_id)
     header += "\r\n\r\n";
     //header += content;
 
-    ESPport.print("AT+CIPSEND="); // ответ клиенту
+    ESPport.print(send_); // ответ клиенту
     ESPport.print(ch_id);
     ESPport.print(",");
     ESPport.println(header.length()+content.length());
@@ -1145,7 +1192,7 @@ void sendReply(int ch_id)
         delay(200);
     } 
 }
-
+*/
 //////////////////////очистка ESPport////////////////////
 void clearSerialBuffer(void)
 {
@@ -1194,7 +1241,7 @@ uint8_t sendData(String command, const int timeout, boolean debug)
 
 }
 
-
+/*
 void playMusic()
 {
     // Serial.println("Play Alarm music");
@@ -1206,15 +1253,15 @@ void playMusic()
  //   Qb_PLAY ("AAGF+L1EL2B>EDL4EDCC<BAL2BEP4>CL4<AL2B.L4GF+<B>GF+L1E");
  //   Qb_PLAY ("L2B>EDL4EDCC<BAL2BEP4>CL4<AL2B.L4GF+<B>GF+L1E");
 }
-
+*/
 time_t getNtpTime()
 {
-  String close_ = "AT+CIPCLOSE=0\r\n";
-  String cmd = "AT+CIPSTART=0,\"UDP\",\"";
+  char close_[] = {"AT+CIPCLOSE=4\r\n"};
+  String cmd = "AT+CIPSTART=4,\"UDP\",\"";
   cmd += ntp;
   cmd += "\",123\r\n";
-  sendData(cmd, 2000, DEBUG);
-  delay(500);
+  sendData(cmd, 1000, DEBUG);
+  delay(20);
   memset(buffer, 0, BUFFER_SIZE); 
   // Initialize values needed to form NTP request
   // (see URL above for details on the packets) 
@@ -1228,9 +1275,11 @@ time_t getNtpTime()
   buffer[14] = 49;
   buffer[15] = 52;
   // Serial.println("Send request");
-  Serial.print("AT+CIPSEND=0,");
+  Serial.print(send_);
+  Serial.print(4);
+  Serial.print(",");
   Serial.println(NTP_PACKET_SIZE);
-  delay(20);
+  delay(100);
   if (Serial.find(">"))
   {
     // Serial.println("Read >");
@@ -1243,11 +1292,11 @@ time_t getNtpTime()
     // Serial.println("Server answer : ");
     i = 0;
   
-    if (Serial.find("+IPD,0,48:"))
+    if (Serial.find("+IPD,4,48:"))
     {
       // Serial.println("Found +IPD,48:");
       time_ = millis();  
-      while( (time_+500) > millis())
+      while( (time_+400) > millis())
       {
           while((Serial.available()) && (i < NTP_PACKET_SIZE))
           {
