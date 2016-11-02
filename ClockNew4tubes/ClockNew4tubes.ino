@@ -18,7 +18,7 @@
 
 // Объявляем переменные и константы
 #define DEBUG false 
-#define BUFFER_SIZE 120
+#define BUFFER_SIZE 160
 #define NUMITEMS(arg) ((size_t) (sizeof (arg) / sizeof (arg [0])))
 #define ONE_WIRE_BUS A3                //Это вывод для подключения вывода DS, при распайке на плате RTS1703 датчика температуры                  
 #define TEMPERATURE_PRECISION 9
@@ -214,7 +214,7 @@ char *pb;
 time_t t;
 
 //для динамика
-const int tempo = 300;
+const int tempo = 200;
 
 // массив для наименований нот (до ре ми ... и т.д. в пределах двух октав) 
  const char names[] = { 'c', 'd', 'e', 'f', 'g', 'a', 'b', 'C','D','E','F','G','A','B' }; 
@@ -222,14 +222,11 @@ const int tempo = 300;
  const int tones[] = { 1915, 1700, 1519, 1432, 1275, 1136, 1014, 956, 850, 759, 716, 638, 568, 507 }; 
 
 // ноты мелодии 
-const char notes[] = "GECgabCaCg DGECabCDED EFEDGEDC CECaCag gCEDgCEDEFGECDgC "; // пробел - это пауза 
+const char notes[] = "GECgabCaCg DGECabCDED"; // пробел - это пауза 
 // длительность для каждой ноты и паузы 
 const uint8_t beats[] = { 4, 4, 4, 4, 1, 1, 1, 2, 1, 4, 
                           2, 4, 4, 4, 4, 1, 1, 1, 2, 1, 
-                          4, 2, 1, 1, 1, 1, 2, 1, 1, 4, 
-                          2, 1, 2, 1, 2, 1, 1, 4, 2, 1, 
-                          2, 1, 2, 1, 2, 1, 2, 1, 1, 1, 
-                          1, 1, 2, 1, 4, 4, 4} ; 
+                          4}; 
 
 const uint8_t length = sizeof(notes); // количество нот  
 
@@ -454,7 +451,7 @@ void printConsoleTime()
 void loop(){
    
    wdt_reset();                                //Циклический сброс таймера 
-   StaticJsonBuffer<120> jsonBuffer;
+   StaticJsonBuffer<160> jsonBuffer;
    int ch_id, packet_len;
 
     // Чтение кнопок идет до обработки полученных данных через WiFi
@@ -658,7 +655,7 @@ void loop(){
       if((tm.Hour>=22)&&(tm.Hour<0)) dayNight=10;
       if((tm.Hour>=0)&&(tm.Hour<8)) dayNight=1;  //1
     }
-    // analogWriteA(Led_1, dayNight);  
+    analogWrite(Led_1, dayNight);  
 
     // Работа таймера
     //Если включен таймер
@@ -688,6 +685,9 @@ void loop(){
               //time_hh = 99;
                 playMusic();
                 isTimerOn = false;
+                time_ss = 0;
+                time_mm = 0;
+                time_hh = 0;
             }
           }
         }
@@ -715,6 +715,7 @@ void loop(){
         NumberArray[0] = tm.Hour / 10; //Первый знак часа
         NumberArray[1] = tm.Hour % 10; //Второй знак часа
         NumberArray[2] = Mins / 10; //Первый знак минут
+        NumberArray[3] = Mins % 10; //Первый знак минут
         break;
     case 1:
         NumberArray[0] = tm.Day / 10; //Первый знак дня
@@ -733,8 +734,8 @@ void loop(){
         //digitalWrite(Pin_dot1, HIGH);
         //digitalWrite(Pin_dot2, HIGH);
         if (isAlarm) {
-          //  Pin_dot1_ON
-          //  Pin_dot2_ON
+            Pin_dot1_ON
+            Pin_dot2_ON
         } 
        break;
 
@@ -812,7 +813,7 @@ void loop(){
         break;
     }
 
-    if  (timeset==0&&alarmclockset==0&&mode!=4){      //Мы не в режиме установки времени, часов и не в режиме анимации.
+    if  (timeset==0&&alarmclockset==0&&mode<4){      //Мы не в режиме установки времени, часов и не в режиме анимации, таймера, выключения.
         //Каждые пол часа пищим
         // if ((Mins == 0)&&sec||(Mins == 30)&&sec)
         // {
@@ -824,7 +825,7 @@ void loop(){
         //   sec=true;
         // }
         //Каждые 58 секунд включаем время
-     if (mode_auto&&mode < 5)     //Если выбран режим авто смены и мы не в режимах 5, 6
+     if (mode_auto&&mode < 4)     //Если выбран режим авто смены и мы не в режимах 4, 5, 6
        {
         if (Seconds==58)
         {
