@@ -102,7 +102,7 @@ uint8_t alarmMin = 0;
 uint8_t dayNight = 255;
 
 float tempC;
-bool sensorTemperatureIn = false;
+bool sensorTemperatureIn = true;      //Для ds3231 считаем что датчик всегда есть
 bool isReadTemperature = false;
                    
 boolean isAlarm = false;
@@ -298,7 +298,7 @@ void loop() // выполняется циклически
         
             if (!isReadTemperature)
             {
-                tempC = RTC.gettemperature();         
+                tempC = RTC.gettemperature()+7;   // Поправка         
                 isReadTemperature = true;
                 b = (tempC - int(tempC))*100;
                 //Serial.println((int)b/10);
@@ -339,7 +339,7 @@ void loop() // выполняется циклически
 
             millisThis = millis();                                 //время сейчас
             // unsigned int mills = NumberAnimationDelay[a];
-            if(millisThis - millisAnimation > NumberAnimationArray[a][6]*50) {  //Если время на анимацию одного шага вышло, переходим к другому
+            if(millisThis - millisAnimation > NumberAnimationArray[a][6]) {  //Если время на анимацию одного шага вышло, переходим к другому
                 a++;
                 millisAnimation = millisThis;
             }

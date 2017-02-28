@@ -33,8 +33,8 @@
 #define OK 0
 #define ERR 1
 #define DATA 2 
-#define ssid "home3"
-#define pass "step972v"
+#define ssid "home"
+#define pass "xxxxx"
 #define ntp "89.109.251.21"
 #define timeZone 3
 /*
@@ -302,7 +302,8 @@ void setup()
    sensors.begin();
    wdt_disable(); 
     if (sensors.getAddress(insideThermometer, 0)) {
-        sensorTemperatureIn = true;
+        // sensorTemperatureIn = true;
+         sensorTemperatureIn = false;
         sensors.setResolution(insideThermometer, TEMPERATURE_PRECISION);
    }
    
@@ -314,7 +315,7 @@ void setup()
       } 
     sendData("AT+RST\r\n",2000,DEBUG);
     // sendData("ATE1\r\n",500,DEBUG);  
-    /*  
+      
      //Как точка доступа     
     sendData("AT+CWMODE=2\r\n",300,DEBUG);
     sendData("AT+CIPMUX=1\r\n",500,DEBUG);
@@ -323,8 +324,8 @@ void setup()
      } else {
       esp8266in = false; 
      }
-*/
-    
+
+/*    
     // Подключение к существующей точке
     sendData("AT+CWMODE=3\r\n",1000,DEBUG); 
     // sendData("AT+CWQAP\r\n",500,DEBUG);
@@ -343,7 +344,8 @@ void setup()
        esp8266in = true;
      } else {
       esp8266in = false; 
-     }    
+     }
+     */    
     wdt_enable(WDTO_8S);        //Установка тамера для перезагрузки при подвисании программы
   
 }
@@ -659,7 +661,6 @@ void loop() // выполняется циклически
     case 3:                                //отображение температуры
         if(sensorTemperatureIn)
         {
-        
             if (!isReadTemperature)
             {
                 sensors.requestTemperatures();
@@ -725,17 +726,19 @@ void loop() // выполняется циклически
         NumberArray[5] = time_ss % 10; //Второй знак секунд
         break;   
      case 6:            //Режим выключения ламп, тупо подаем 10 на дешифраторы и ничего на них не отображаем
-        
+        /*
         NumberArray[0] = 10; 
         NumberArray[1] = 10; 
         NumberArray[2] = 10; 
         NumberArray[3] = 10;    //   
         NumberArray[4] = 10;        
         NumberArray[5] = 10;
+        */
+        dayNight=0;
         break;
     }
 
-    if  (timeset==0&&alarmclockset==0&&mode<4){      //Мы не в режиме установки времени, часов и не в режиме анимации, таймера, выключения.
+    if  (timeset==0&&alarmclockset==0){      //Мы не в режиме установки времени, часов и не в режиме анимации, таймера, выключения.
         //Каждые пол часа пищим
         // if ((Mins == 0)&&sec||(Mins == 30)&&sec)
         // {
@@ -782,6 +785,7 @@ void loop() // выполняется циклически
         {
             up=true;
             animate=true;
+            dayNight=1;
             tone(Buzz_1,100, 100);
             mode++;
             mode %= 7;          //перебор всех режимов отображения 
@@ -790,7 +794,11 @@ void loop() // выполняется циклически
                 a=0;              //переход к первому шагу анимации
                 millisAnimation = millis();                  //фиксируем время начала анимации
             }
-            if (mode==3) isReadTemperature = false;   //Для чтения температуры при ручной смене режима отображения
+            if (mode==3){
+             // isReadTemperature = false;   //Для чтения температуры при ручной смене режима отображения
+              
+              mode=6;
+            }
             // printConsoleTime();
             // Serial.print("Mode change to - ");
             // Serial.println(mode);
@@ -1307,17 +1315,33 @@ void DisplayNumberSetA(uint8_t anod, uint8_t num1, uint8_t num2 ) {
     }
 }
 
+void DisplayNumberSetOff() {      //Режим Off
+    digitalWrite(anods[0], LOW); // Выключаем анод
+    digitalWrite(anods[1], LOW); // Выключаем анод
+    digitalWrite(anods[2], LOW); // Выключаем анод
+    delay(DELAY_SHOW*4);
+}
 
 void DisplayNumberString( uint8_t* array ) {    //Функция для отображения строки цифр из массива array
-
-    if (mode == 0) {              //Если показ времени то с анимацией
+/*
+    if ((mode == 0) and (timeset==0))  {              //Если показ времени то с анимацией
         DisplayNumberSetA(0,0,3);   //Выводим на 1 анод (лампы 1,4) цифры 1,4 из массива
         DisplayNumberSetA(1,1,4);   //Выводим на 2 анод (лампы 2,5) цифры 2,5 из массива
         DisplayNumberSetA(2,2,5);   //Выводим на 3 анод (лампы 3,6) цифры 3,6 из массива
-    } else {                      //В других режимах нет
+    }  
+    */if(mode == 6) {        //Если режим с выключенными лампами
+        DisplayNumberSetOff(); 
+    } else  
+    {                      //В других режимах анимации нет
+
+        DisplayNumberSetA(0,0,3);   //Выводим на 1 анод (лампы 1,4) цифры 1,4 из массива
+        DisplayNumberSetA(1,1,4);   //Выводим на 2 анод (лампы 2,5) цифры 2,5 из массива
+        DisplayNumberSetA(2,2,5);   //Выводим на 3 анод (лампы 3,6) цифры 3,6 из массива
+        /*
         DisplayNumberSet(0,array[0],array[3]);   //Выводим на 1 анод (лампы 1,4) цифры 1,4 из массива
         DisplayNumberSet(1,array[1],array[4]);   //Выводим на 2 анод (лампы 2,5) цифры 2,5 из массива
         DisplayNumberSet(2,array[2],array[5]);   //Выводим на 3 анод (лампы 3,6) цифры 3,6 из массива
+        */
     }
 }
 
